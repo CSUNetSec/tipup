@@ -106,5 +106,9 @@ fn main() {
     }
 
     report.insert_bson("Vantages".to_owned(), Bson::Array(vantages));
-    println!("{}", report);
+
+    let collection = client.db("proddle").collection("vantage_reports");
+    if let Err(e) = collection.insert_one(report, None) {
+        panic!("failed to insert report: {}", e);
+    }
 }
