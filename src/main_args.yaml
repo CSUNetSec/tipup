@@ -13,7 +13,7 @@ args:
         short: p
         long: port
         takes_value: true
-        default_value: 27017
+        default_value: "27017"
         help: Port of mongodb instance
     - OUTPUT_DIRECTORY:
         short: o
