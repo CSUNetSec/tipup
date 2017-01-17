@@ -1,0 +1,23 @@
+name: tipup
+version: "1.0"
+author: Daniel Rammer <hamersaw@bushpath.com>
+about: Proddle analysis application
+args:
+    - MONGODB_IP_ADDRESS:
+        short: i
+        long: ip_address
+        takes_value: true
+        default_value: 127.0.0.1
+        help: Ip address of mongodb instance
+    - MONGODB_PORT:
+        short: p
+        long: port
+        takes_value: true
+        default_value: 27017
+        help: Port of mongodb instance
+    - OUTPUT_DIRECTORY:
+        short: o
+        long: output_dir
+        takes_value: true
+        default_value: "/tmp"
+        help: Directory to write stats files
