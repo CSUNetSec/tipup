@@ -61,7 +61,22 @@ fn main() {
             },
         };
 
-        vantage.insert_bson("IpAddress".to_owned(), Bson::Array(ip_results));
+        //iterate over ip addresses
+        let mut ip_addresses = Vec::new();
+        for ip_result in ip_results {
+            let ip_address = match ip_result {
+                Bson::String(ip_address) => ip_address,
+                _ => continue,
+            };
+
+            //create ip document
+            let mut ip = OrderedDocument::new();
+            ip.insert_bson("Ip".to_owned(), Bson::String(ip_address.to_owned()));
+
+            ip_addresses.push(Bson::Document(ip));
+        }
+
+        vantage.insert_bson("IpAddress".to_owned(), Bson::Array(ip_addresses));
  
         //get all modules for this vantage
         let filter_hostname = hostname.to_owned();
