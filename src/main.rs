@@ -28,17 +28,20 @@ fn main() {
         Err(e) => panic!("failed to connect to mongodb cluster: {}", e),
     };
 
-    //query for unique hostnames
-    let collection = client.db("proddle").collection("results");
-    let results = match collection.distinct("Hostname", None, None) {
-        Ok(results) => results,
-        Err(e) => panic!("failed to execute distinct hostname query: {}", e),
-    };
-
+    //create document
     let now = time::now_utc().to_timespec().sec;
+    let yesterday = now - (24 * 60 * 60);
+
     let mut report = OrderedDocument::new();
     report.insert_bson("Timestamp".to_owned(), Bson::I64(now));
     let mut vantages = Vec::new();
+
+    //query for unique hostnames
+    let collection = client.db("proddle").collection("results");
+    let results = match collection.distinct("Hostname", Some(doc!{"Timestamp" => {"$gte" => yesterday}}), None) {
+        Ok(results) => results,
+        Err(e) => panic!("failed to execute distinct hostname query: {}", e),
+    };
 
     //iterate over unique hostnames
     for result in results {
@@ -52,7 +55,7 @@ fn main() {
 
         //get ip address of hostname
         let filter_hostname = hostname.to_owned();
-        let filter_document = Some(doc!{ "Hostname" => filter_hostname });
+        let filter_document = Some(doc!{"Timestamp" => {"$gte" => yesterday}, "Hostname" => filter_hostname});
         let ip_results = match collection.distinct("IpAddress", filter_document, None) {
             Ok(ip_results) => ip_results,
             Err(e) => {
@@ -76,11 +79,11 @@ fn main() {
             ip_addresses.push(Bson::Document(ip));
         }
 
-        vantage.insert_bson("IpAddress".to_owned(), Bson::Array(ip_addresses));
+        vantage.insert_bson("IpAddresses".to_owned(), Bson::Array(ip_addresses));
  
         //get all modules for this vantage
         let filter_hostname = hostname.to_owned();
-        let filter_document = Some(doc!{ "Hostname" => filter_hostname });
+        let filter_document = Some(doc!{"Timestamp" => {"$gte" => yesterday}, "Hostname" => filter_hostname});
         let module_results = match collection.distinct("Module", filter_document, None) {
             Ok(module_results) => module_results,
             Err(e) => {
@@ -103,7 +106,7 @@ fn main() {
 
             //get count of modules
             let (filter_hostname, filter_module_name) = (hostname.to_owned(), module_name.to_owned());
-            let filter = Some(doc!{ "Hostname" => filter_hostname, "Module" => filter_module_name });
+            let filter = Some(doc!{"Timestamp" => {"$gte" => yesterday}, "Hostname" => filter_hostname, "Module" => filter_module_name});
             let module_count = match collection.count(filter, None) {
                 Ok(module_count) => module_count,
                 Err(e) => {
