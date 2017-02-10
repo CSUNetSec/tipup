@@ -4,14 +4,39 @@ author: Daniel Rammer <hamersaw@bushpath.com>
 about: Proddle analysis application
 args:
     - MONGODB_IP_ADDRESS:
-        short: i
-        long: ip_address
+        short: I
+        long: mongodb_ip_address
         takes_value: true
         default_value: 127.0.0.1
-        help: Ip address of mongodb instance
+        help: Ip address for mongodb instance.
     - MONGODB_PORT:
-        short: p
-        long: port
+        short: P
+        long: mongodb_port
         takes_value: true
         default_value: "27017"
-        help: Port of mongodb instance
+        help: Port for mongodb instance.
+    - CA_FILE:
+        short: c
+        long: ca_file
+        takes_value: true
+        help: Certificate authority cert file for ssl connection.
+    - CERTIFICATE_FILE:
+        short: e
+        long: cert_file
+        takes_value: true
+        help: Certificate file for ssl connection.
+    - KEY_FILE:
+        short: k
+        long: key_file
+        takes_value: true
+        help: Key file for ssl connection.
+    - USERNAME:
+        short: u
+        long: username
+        takes_value: true
+        help: Username for mongodb connection.
+    - PASSWORD:
+        short: p
+        long: password
+        takes_value: true
+        help: Password for mongodb connection.
