@@ -17,11 +17,14 @@ use mongodb::db::{Database, ThreadedDatabase};
 mod analyzer;
 mod demultiplexor;
 mod error;
+mod flag_manager;
 
 use analyzer::{Analyzer, BayesianAnalyzer, ErrorAnalyzer};
-use error::TipupError;
 use demultiplexor::Demultiplexor;
+use error::TipupError;
+use flag_manager::{Flag, FlagManager};
 
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 fn parse_args(matches: &ArgMatches) -> Result<(String, u16, String, String, String, String, String), TipupError> {
@@ -60,9 +63,25 @@ fn main() {
         panic!("{}", e);
     }
 
+    //create flag manager and start
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut flag_manager = FlagManager::new();
+        loop {
+            let flag = match rx.recv() {
+                Ok(flag) => flag,
+                Err(e) => panic!("{}", e),
+            };
+
+            if let Err(e) = flag_manager.process_flag(&flag) {
+                panic!("{}", e);
+            }
+        }
+    });
+
     //create new demultiplexor
     let mut demultiplexor = Demultiplexor::new();
-    if let Err(e) = load_analyzers(&db, &mut demultiplexor) {
+    if let Err(e) = load_analyzers(&db, &mut demultiplexor, tx) {
         panic!("{}", e);
     }
 
@@ -76,7 +95,7 @@ fn main() {
     }
 }
 
-fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor) -> Result<(), TipupError> {
+fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<Flag>) -> Result<(), TipupError> {
     //query mongodb for analyzer definitions
     let cursor = try!(db.collection("analyzers").find(None, None));
     for document in cursor {
@@ -104,8 +123,8 @@ fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor) -> Result<()
 
         //create analyzer
         let analyzer = match class.as_ref() {
-            "BayesianAnalyzer" => Box::new(try!(BayesianAnalyzer::new(parameters))) as Box<Analyzer>,
-            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(parameters))) as Box<Analyzer>,
+            "BayesianAnalyzer" => Box::new(try!(BayesianAnalyzer::new(parameters, tx.clone()))) as Box<Analyzer>,
+            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(parameters, tx.clone()))) as Box<Analyzer>,
             _ => return Err(TipupError::from("")),
         };
 
