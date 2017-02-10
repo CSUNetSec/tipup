@@ -9,7 +9,8 @@ pub struct FlagManager {
 
 impl FlagManager {
     pub fn new() -> FlagManager {
-        unimplemented!();
+        FlagManager {
+        }
     }
 
     pub fn process_flag(&self, flag: &Flag) -> Result<(), TipupError> {

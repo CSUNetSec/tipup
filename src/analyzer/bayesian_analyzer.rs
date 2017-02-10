@@ -1,4 +1,4 @@
-use bson::ordered::OrderedDocument;
+use bson::Bson;
 
 use analyzer::Analyzer;
 use error::TipupError;
@@ -11,7 +11,7 @@ pub struct BayesianAnalyzer {
 }
 
 impl BayesianAnalyzer {
-    pub fn new(_: &OrderedDocument, tx: Sender<Flag>) -> Result<BayesianAnalyzer, TipupError> {
+    pub fn new(_: &Vec<Bson>, tx: Sender<Flag>) -> Result<BayesianAnalyzer, TipupError> {
         Ok(
             BayesianAnalyzer {
                 tx: tx,

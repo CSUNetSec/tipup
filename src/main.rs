@@ -106,9 +106,9 @@ fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<F
             _ => return Err(TipupError::from("failed to parse analyzer name")),
         };
 
-        let class = match document.get("type") {
+        let class = match document.get("class") {
             Some(&Bson::String(ref class)) => class,
-            _ => return Err(TipupError::from("failed to parse analyzer type")),
+            _ => return Err(TipupError::from("failed to parse analyzer class")),
         };
 
         let measurement = match document.get("measurement") {
@@ -117,7 +117,7 @@ fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<F
         };
 
         let parameters = match document.get("parameters") {
-            Some(&Bson::Document(ref parameters)) => parameters,
+            Some(&Bson::Array(ref parameters)) => parameters,
             _ => return Err(TipupError::from("failed to parse analyzer parameters")),
         };
 
@@ -125,7 +125,7 @@ fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<F
         let analyzer = match class.as_ref() {
             "BayesianAnalyzer" => Box::new(try!(BayesianAnalyzer::new(parameters, tx.clone()))) as Box<Analyzer>,
             "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(parameters, tx.clone()))) as Box<Analyzer>,
-            _ => return Err(TipupError::from("")),
+            _ => return Err(TipupError::from("unknown analyzer class")),
         };
 
         //add analyzer to demultiplexor

@@ -1,4 +1,4 @@
-use bson::ordered::OrderedDocument;
+use bson::Bson;
 
 use analyzer::Analyzer;
 use error::TipupError;
@@ -11,7 +11,7 @@ pub struct ErrorAnalyzer {
 }
 
 impl ErrorAnalyzer {
-    pub fn new(_: &OrderedDocument, tx: Sender<Flag>) -> Result<ErrorAnalyzer, TipupError> {
+    pub fn new(_: &Vec<Bson>, tx: Sender<Flag>) -> Result<ErrorAnalyzer, TipupError> {
         Ok(
             ErrorAnalyzer {
                 tx: tx,
