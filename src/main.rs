@@ -12,16 +12,16 @@ use bson::Bson;
 use bson::ordered::OrderedDocument;
 use clap::{App, ArgMatches};
 use mongodb::{Client, ClientOptions, ThreadedClient};
-use mongodb::db::ThreadedDatabase;
+use mongodb::db::{Database, ThreadedDatabase};
 
 mod analyzer;
 mod demultiplexor;
 mod error;
 
+use analyzer::{Analyzer, BayesianAnalyzer, ErrorAnalyzer};
 use error::TipupError;
 use demultiplexor::Demultiplexor;
 
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 fn parse_args(matches: &ArgMatches) -> Result<(String, u16, String, String, String, String, String), TipupError> {
@@ -40,7 +40,7 @@ fn main() {
     env_logger::init().unwrap();
 
     //parse arguments
-    let yaml = load_yaml!("main_args.yaml");
+    let yaml = load_yaml!("args.yaml");
     let matches = App::from_yaml(yaml).get_matches();
 
     let (mongodb_ip_address, mongodb_port, ca_file, certificate_file, key_file, username, password) = match parse_args(&matches) {
@@ -55,25 +55,67 @@ fn main() {
         Err(e) => panic!("{}", e),
     };
 
-    let db = client.db("proddle");
+    let db = client.db("tipup");
     if let Err(e) = db.auth(&username, &password) {
         panic!("{}", e);
     }
 
-    //query mongodb for analyzer definition
-
     //create new demultiplexor
-    let mut demultiplexor = Arc::new(Mutex::new(Demultiplexor::new(db)));
+    let mut demultiplexor = Demultiplexor::new();
+    if let Err(e) = load_analyzers(&db, &mut demultiplexor) {
+        panic!("{}", e);
+    }
 
     //demultiplexor loop
     loop {
-        {
-            let demultiplexor = demultiplexor.lock().unwrap();
-            if let Err(e) = demultiplexor.fetch() {
-                error!("{}", e);
-            }
+        if let Err(e) = fetch_results(&db, &demultiplexor) {
+            panic!("{}", e);
         }
 
         std::thread::sleep(Duration::new(30, 0))
     }
+}
+
+fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor) -> Result<(), TipupError> {
+    //query mongodb for analyzer definitions
+    let cursor = try!(db.collection("analyzers").find(None, None));
+    for document in cursor {
+        //parse document
+        let document = try!(document);        
+        let name = match document.get("name") {
+            Some(&Bson::String(ref name)) => name,
+            _ => return Err(TipupError::from("failed to parse analyzer name")),
+        };
+
+        let class = match document.get("type") {
+            Some(&Bson::String(ref class)) => class,
+            _ => return Err(TipupError::from("failed to parse analyzer type")),
+        };
+
+        let measurement = match document.get("measurement") {
+            Some(&Bson::String(ref measurement)) => measurement,
+            _ => return Err(TipupError::from("failed to parse analyzer measurement")),
+        };
+
+        let parameters = match document.get("parameters") {
+            Some(&Bson::Document(ref parameters)) => parameters,
+            _ => return Err(TipupError::from("failed to parse analyzer parameters")),
+        };
+
+        //create analyzer
+        let analyzer = match class.as_ref() {
+            "BayesianAnalyzer" => Box::new(try!(BayesianAnalyzer::new(parameters))) as Box<Analyzer>,
+            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(parameters))) as Box<Analyzer>,
+            _ => return Err(TipupError::from("")),
+        };
+
+        //add analyzer to demultiplexor
+        try!(demultiplexor.add_analyzer(name.to_owned(), measurement.to_owned(), analyzer));
+    }
+
+    Ok(())
+}
+
+fn fetch_results(db: &Database, demultiplexor: &Demultiplexor) -> Result<(), TipupError> {
+    unimplemented!();
 }
