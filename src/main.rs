@@ -146,9 +146,8 @@ fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<F
 }
 
 fn fetch_results(db: &Database, demultiplexor: &Demultiplexor, results_seen: &HashMap<String, i64>) -> Result<(), TipupError> {
-    let start_time = UTC::now().timestamp() - (60 * 60 * 4);
     //TODO start_time is the lowest time in results_seen || 0
- 
+    let start_time = UTC::now().timestamp() - (60 * 60 * 4);
     let gte = doc! { "$gte" => start_time };
     let search_document = Some(doc! {
         "timestamp" => gte
@@ -162,7 +161,7 @@ fn fetch_results(db: &Database, demultiplexor: &Demultiplexor, results_seen: &Ha
         no_cursor_timeout: false,
         op_log_replay: false,
         skip: 0,
-        limit: 1,
+        limit: 0,
         cursor_type: CursorType::NonTailable,
         batch_size: 0,
         comment: None,
@@ -176,7 +175,6 @@ fn fetch_results(db: &Database, demultiplexor: &Demultiplexor, results_seen: &Ha
     let cursor = try!(db.collection("results").find(search_document, find_options));
     for document in cursor {
         let document = try!(document);
-        println!("{:?}", document);
 
         //TODO compare timestamp and hostname to see if analysis is necessary & update results_seen
         //accordingly

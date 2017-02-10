@@ -1,3 +1,5 @@
+use bson::ordered::OrderedDocument;
+
 pub mod error_analyzer;
 pub mod bayesian_analyzer; 
 
@@ -7,5 +9,5 @@ pub use analyzer::bayesian_analyzer::BayesianAnalyzer;
 use error::TipupError;
 
 pub trait Analyzer {
-    fn add_result(&self) -> Result<(), TipupError>;
+    fn process_result(&self, document: &OrderedDocument) -> Result<(), TipupError>;
 }

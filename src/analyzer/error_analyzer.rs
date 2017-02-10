@@ -1,4 +1,5 @@
 use bson::Bson;
+use bson::ordered::OrderedDocument;
 
 use analyzer::Analyzer;
 use error::TipupError;
@@ -21,7 +22,9 @@ impl ErrorAnalyzer {
 }
 
 impl Analyzer for ErrorAnalyzer {
-    fn add_result(&self) -> Result<(), TipupError> {
-        unimplemented!();
+    fn process_result(&self, document: &OrderedDocument) -> Result<(), TipupError> {
+        println!("TODO ErrorAnalyzer process doc: {:?}", document);
+
+        Ok(())
     }
 }

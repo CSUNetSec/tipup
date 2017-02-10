@@ -1,4 +1,5 @@
 use bson::Bson;
+use bson::ordered::OrderedDocument;
 
 use analyzer::Analyzer;
 use error::TipupError;
@@ -21,7 +22,7 @@ impl BayesianAnalyzer {
 }
 
 impl Analyzer for BayesianAnalyzer {
-    fn add_result(&self) -> Result<(), TipupError> {
+    fn process_result(&self, document: &OrderedDocument) -> Result<(), TipupError> {
         unimplemented!();
     }
 }

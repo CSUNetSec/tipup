@@ -1,3 +1,4 @@
+use bson::Bson;
 use bson::ordered::OrderedDocument;
 
 use analyzer::Analyzer;
@@ -28,7 +29,21 @@ impl Demultiplexor {
         Ok(())
     }
 
-    pub fn send_result(&self, result: &OrderedDocument) -> Result<(), TipupError> {
-        unimplemented!();
+    pub fn send_result(&self, document: &OrderedDocument) -> Result<(), TipupError> {
+        //get measurement name
+        let measurement = match document.get("measurement") {
+            Some(&Bson::String(ref measurement)) => measurement,
+            _ => return Err(TipupError::from("failed to parse result measurement")),
+        };
+
+        //send to analyzers registered to that measurement
+        let analyzers = self.analyzers.lock().unwrap();
+        if analyzers.contains_key(measurement) {
+            for analyzer in analyzers.get(measurement).unwrap().values() {
+                try!(analyzer.process_result(document));
+            }
+        }
+
+        Ok(())
     }
 }
