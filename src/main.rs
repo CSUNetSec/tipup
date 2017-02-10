@@ -1,5 +1,6 @@
 #[macro_use(bson, doc)]
 extern crate bson;
+extern crate chrono;
 #[macro_use]
 extern crate clap;
 extern crate env_logger;
@@ -10,8 +11,10 @@ extern crate time;
 
 use bson::Bson;
 use bson::ordered::OrderedDocument;
+use chrono::offset::utc::UTC;
 use clap::{App, ArgMatches};
 use mongodb::{Client, ClientOptions, ThreadedClient};
+use mongodb::coll::options::{CursorType, FindOptions};
 use mongodb::db::{Database, ThreadedDatabase};
 
 mod analyzer;
@@ -24,6 +27,7 @@ use demultiplexor::Demultiplexor;
 use error::TipupError;
 use flag_manager::{Flag, FlagManager};
 
+use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -58,11 +62,6 @@ fn main() {
         Err(e) => panic!("{}", e),
     };
 
-    let db = client.db("tipup");
-    if let Err(e) = db.auth(&username, &password) {
-        panic!("{}", e);
-    }
-
     //create flag manager and start
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -81,17 +80,28 @@ fn main() {
 
     //create new demultiplexor
     let mut demultiplexor = Demultiplexor::new();
+    let db = client.db("tipup");
+    if let Err(e) = db.auth(&username, &password) {
+        panic!("{}", e);
+    }
+
     if let Err(e) = load_analyzers(&db, &mut demultiplexor, tx) {
         panic!("{}", e);
     }
 
     //demultiplexor loop
+    let mut results_seen = HashMap::new();
+    let db = client.db("proddle");
+    if let Err(e) = db.auth(&username, &password) {
+        panic!("{}", e);
+    }
+
     loop {
-        if let Err(e) = fetch_results(&db, &demultiplexor) {
+        if let Err(e) = fetch_results(&db, &demultiplexor, &results_seen) {
             panic!("{}", e);
         }
 
-        std::thread::sleep(Duration::new(30, 0))
+        std::thread::sleep(Duration::new(60, 0))
     }
 }
 
@@ -100,7 +110,7 @@ fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<F
     let cursor = try!(db.collection("analyzers").find(None, None));
     for document in cursor {
         //parse document
-        let document = try!(document);        
+        let document = try!(document);
         let name = match document.get("name") {
             Some(&Bson::String(ref name)) => name,
             _ => return Err(TipupError::from("failed to parse analyzer name")),
@@ -135,6 +145,46 @@ fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<F
     Ok(())
 }
 
-fn fetch_results(db: &Database, demultiplexor: &Demultiplexor) -> Result<(), TipupError> {
-    unimplemented!();
+fn fetch_results(db: &Database, demultiplexor: &Demultiplexor, results_seen: &HashMap<String, i64>) -> Result<(), TipupError> {
+    let start_time = UTC::now().timestamp() - (60 * 60 * 4);
+    //TODO start_time is the lowest time in results_seen || 0
+ 
+    let gte = doc! { "$gte" => start_time };
+    let search_document = Some(doc! {
+        "timestamp" => gte
+    });
+
+     //create find options
+    let negative_one = -1;
+    let sort_document = Some(doc! { "timestamp" => negative_one });
+    let find_options = Some(FindOptions {
+        allow_partial_results: false,
+        no_cursor_timeout: false,
+        op_log_replay: false,
+        skip: 0,
+        limit: 1,
+        cursor_type: CursorType::NonTailable,
+        batch_size: 0,
+        comment: None,
+        max_time_ms: None,
+        modifiers: None,
+        projection: None,
+        sort: sort_document,
+        read_preference: None,
+    });
+
+    let cursor = try!(db.collection("results").find(search_document, find_options));
+    for document in cursor {
+        let document = try!(document);
+        println!("{:?}", document);
+
+        //TODO compare timestamp and hostname to see if analysis is necessary & update results_seen
+        //accordingly
+
+        if let Err(e) = demultiplexor.send_result(&document) {
+            panic!("{}", e);
+        }
+    }
+
+    Ok(())
 }

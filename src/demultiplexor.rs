@@ -1,3 +1,5 @@
+use bson::ordered::OrderedDocument;
+
 use analyzer::Analyzer;
 use error::TipupError;
 
@@ -26,7 +28,7 @@ impl Demultiplexor {
         Ok(())
     }
 
-    pub fn send_result(&self) -> Result<(), TipupError> {
+    pub fn send_result(&self, result: &OrderedDocument) -> Result<(), TipupError> {
         unimplemented!();
     }
 }

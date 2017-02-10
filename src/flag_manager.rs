@@ -13,7 +13,7 @@ impl FlagManager {
         }
     }
 
-    pub fn process_flag(&self, flag: &Flag) -> Result<(), TipupError> {
+    pub fn process_flag(&mut self, flag: &Flag) -> Result<(), TipupError> {
         unimplemented!();
     }
 }
