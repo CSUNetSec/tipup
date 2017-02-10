@@ -15,9 +15,3 @@ args:
         takes_value: true
         default_value: "27017"
         help: Port of mongodb instance
-    - OUTPUT_DIRECTORY:
-        short: o
-        long: output_dir
-        takes_value: true
-        default_value: "/tmp"
-        help: Directory to write stats files
