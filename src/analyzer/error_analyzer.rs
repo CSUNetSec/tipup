@@ -23,7 +23,7 @@ impl ErrorAnalyzer {
 
 impl Analyzer for ErrorAnalyzer {
     fn process_result(&self, document: &OrderedDocument) -> Result<(), TipupError> {
-        println!("TODO ErrorAnalyzer process doc: {:?}", document);
+        //println!("TODO ErrorAnalyzer process doc: {:?}", document);
 
         Ok(())
     }

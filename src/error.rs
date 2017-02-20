@@ -38,3 +38,9 @@ impl<'a> From<&'a str> for TipupError {
         TipupError::Tipup(String::from(err))
     }
 }
+
+impl From<String> for TipupError {
+    fn from(err: String) -> TipupError {
+        TipupError::Tipup(err)
+    }
+}

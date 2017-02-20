@@ -80,34 +80,34 @@ fn main() {
 
     //create new demultiplexor
     let mut demultiplexor = Demultiplexor::new();
-    let db = client.db("tipup");
-    if let Err(e) = db.auth(&username, &password) {
+    let tipup_db = client.db("tipup");
+    if let Err(e) = tipup_db.auth(&username, &password) {
         panic!("{}", e);
     }
 
-    if let Err(e) = load_analyzers(&db, &mut demultiplexor, tx) {
+    if let Err(e) = load_analyzers(&tipup_db, &mut demultiplexor, tx) {
         panic!("{}", e);
     }
 
     //demultiplexor loop
     let mut results_seen = HashMap::new();
-    let db = client.db("proddle");
-    if let Err(e) = db.auth(&username, &password) {
+    let proddle_db = client.db("proddle");
+    if let Err(e) = proddle_db.auth(&username, &password) {
         panic!("{}", e);
     }
 
     loop {
-        if let Err(e) = fetch_results(&db, &demultiplexor, &results_seen) {
+        if let Err(e) = fetch_results(&proddle_db, &tipup_db, &demultiplexor, &results_seen) {
             panic!("{}", e);
         }
 
-        std::thread::sleep(Duration::new(60, 0))
+        std::thread::sleep(Duration::new(300, 0))
     }
 }
 
-fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<Flag>) -> Result<(), TipupError> {
+fn load_analyzers(tipup_db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<Flag>) -> Result<(), TipupError> {
     //query mongodb for analyzer definitions
-    let cursor = try!(db.collection("analyzers").find(None, None));
+    let cursor = try!(tipup_db.collection("analyzers").find(None, None));
     for document in cursor {
         //parse document
         let document = try!(document);
@@ -145,43 +145,63 @@ fn load_analyzers(db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<F
     Ok(())
 }
 
-fn fetch_results(db: &Database, demultiplexor: &Demultiplexor, results_seen: &HashMap<String, i64>) -> Result<(), TipupError> {
-    //TODO start_time is the lowest time in results_seen || 0
-    let start_time = UTC::now().timestamp() - (60 * 60 * 4);
-    let gte = doc! { "$gte" => start_time };
-    let search_document = Some(doc! {
-        "timestamp" => gte
-    });
+fn fetch_results(proddle_db: &Database, tipup_db: &Database, demultiplexor: &Demultiplexor, results_seen: &HashMap<String, i64>) -> Result<(), TipupError> {
+    //iterate over distinct hostnames for results
+    let hostname_cursor = try!(proddle_db.collection("results").distinct("hostname", None, None));
+    for hostname_document in hostname_cursor {
+        let hostname = match hostname_document {
+            Bson::String(ref hostname) => hostname,
+            _ => continue,
+        };
 
-     //create find options
-    let negative_one = -1;
-    let sort_document = Some(doc! { "timestamp" => negative_one });
-    let find_options = Some(FindOptions {
-        allow_partial_results: false,
-        no_cursor_timeout: false,
-        oplog_replay: false,
-        skip: None,
-        limit: None,
-        cursor_type: CursorType::NonTailable,
-        batch_size: None,
-        comment: None,
-        max_time_ms: None,
-        modifiers: None,
-        projection: None,
-        sort: sort_document,
-        read_preference: None,
-    });
+        //query tipup db for timestamp of last seen result
+        let search_document = Some(doc! { "hostname" => hostname });
+        let document = try!(tipup_db.collection("last_result_seen_timestamp").find_one(search_document, None));
+        let (hostname_exists, timestamp) = match document {
+            Some(document) => {
+                match document.get("timestamp") {
+                    Some(&Bson::I64(timestamp)) => (true, timestamp),
+                    _ => return Err(TipupError::from(format!("failed to parse 'timestamp' value in tipup.last_seen_result_timestamp for host '{}'", hostname))),
+                }
+            },
+            None => (false, 0),
+        };
 
-    let cursor = try!(db.collection("results").find(search_document, find_options));
-    for document in cursor {
-        let document = try!(document);
+        //iterate over newest results
+        let gte = doc! { "$gte" => timestamp };
+        let search_document = Some(doc! {
+            "hostname" => hostname,
+            "timestamp" => gte
+        });
 
-        //TODO compare timestamp and hostname to see if analysis is necessary & update results_seen
-        //accordingly
+        //create find options
+        let negative_one = -1;
+        let sort_document = Some(doc! { "timestamp" => negative_one });
+        let find_options = Some(FindOptions {
+            allow_partial_results: false,
+            no_cursor_timeout: false,
+            oplog_replay: false,
+            skip: None,
+            limit: None,
+            cursor_type: CursorType::NonTailable,
+            batch_size: None,
+            comment: None,
+            max_time_ms: None,
+            modifiers: None,
+            projection: None,
+            sort: sort_document,
+            read_preference: None,
+        });
 
-        if let Err(e) = demultiplexor.send_result(&document) {
-            panic!("{}", e);
+        let cursor = try!(proddle_db.collection("results").find(search_document, find_options));
+        for document in cursor {
+            let document = try!(document);
+            if let Err(e) = demultiplexor.send_result(&document) {
+                panic!("document:{:?} err:{}", document, e);
+            }
         }
+
+        //TODO update tipup db with new most recently seen timestamp value for hostname
     }
 
     Ok(())
