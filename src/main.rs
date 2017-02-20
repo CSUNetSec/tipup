@@ -14,7 +14,7 @@ use bson::ordered::OrderedDocument;
 use chrono::offset::utc::UTC;
 use clap::{App, ArgMatches};
 use mongodb::{Client, ClientOptions, ThreadedClient};
-use mongodb::coll::options::{CursorType, FindOptions};
+use mongodb::coll::options::{CursorType, FindOneAndUpdateOptions, FindOptions};
 use mongodb::db::{Database, ThreadedDatabase};
 
 mod analyzer;
@@ -90,14 +90,13 @@ fn main() {
     }
 
     //demultiplexor loop
-    let mut results_seen = HashMap::new();
     let proddle_db = client.db("proddle");
     if let Err(e) = proddle_db.auth(&username, &password) {
         panic!("{}", e);
     }
 
     loop {
-        if let Err(e) = fetch_results(&proddle_db, &tipup_db, &demultiplexor, &results_seen) {
+        if let Err(e) = fetch_results(&proddle_db, &tipup_db, &demultiplexor) {
             panic!("{}", e);
         }
 
@@ -145,7 +144,7 @@ fn load_analyzers(tipup_db: &Database, demultiplexor: &mut Demultiplexor, tx: Se
     Ok(())
 }
 
-fn fetch_results(proddle_db: &Database, tipup_db: &Database, demultiplexor: &Demultiplexor, results_seen: &HashMap<String, i64>) -> Result<(), TipupError> {
+fn fetch_results(proddle_db: &Database, tipup_db: &Database, demultiplexor: &Demultiplexor) -> Result<(), TipupError> {
     //iterate over distinct hostnames for results
     let hostname_cursor = try!(proddle_db.collection("results").distinct("hostname", None, None));
     for hostname_document in hostname_cursor {
@@ -155,21 +154,21 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, demultiplexor: &Dem
         };
 
         //query tipup db for timestamp of last seen result
-        let search_document = Some(doc! { "hostname" => hostname });
-        let document = try!(tipup_db.collection("last_result_seen_timestamp").find_one(search_document, None));
-        let (hostname_exists, timestamp) = match document {
+        let tipup_search_document = Some(doc! { "hostname" => hostname });
+        let document = try!(tipup_db.collection("last_seen_result").find_one(tipup_search_document, None));
+        let timestamp = match document {
             Some(document) => {
                 match document.get("timestamp") {
-                    Some(&Bson::I64(timestamp)) => (true, timestamp),
-                    _ => return Err(TipupError::from(format!("failed to parse 'timestamp' value in tipup.last_seen_result_timestamp for host '{}'", hostname))),
+                    Some(&Bson::I64(timestamp)) => timestamp,
+                    _ => return Err(TipupError::from(format!("failed to parse 'timestamp' value in tipup.last_seen_result for host '{}'", hostname))),
                 }
             },
-            None => (false, 0),
+            None => 0,
         };
 
         //iterate over newest results
         let gte = doc! { "$gte" => timestamp };
-        let search_document = Some(doc! {
+        let proddle_search_document = Some(doc! {
             "hostname" => hostname,
             "timestamp" => gte
         });
@@ -193,15 +192,36 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, demultiplexor: &Dem
             read_preference: None,
         });
 
-        let cursor = try!(proddle_db.collection("results").find(search_document, find_options));
+        //iterate over new results
+        let cursor = try!(proddle_db.collection("results").find(proddle_search_document, find_options));
+        let mut max_timestamp = -1;
         for document in cursor {
             let document = try!(document);
             if let Err(e) = demultiplexor.send_result(&document) {
                 panic!("document:{:?} err:{}", document, e);
             }
+
+            match document.get("timestamp") {
+                Some(&Bson::I64(result_timestamp)) => max_timestamp = std::cmp::max(max_timestamp, result_timestamp),
+                _ => return Err(TipupError::from("failed to parse 'timestamp' value in result")),
+            }
         }
 
-        //TODO update tipup db with new most recently seen timestamp value for hostname
+        //update tipup db with most recenlty seen result timestamp
+        println!("timestamp:{} max_timestamp:{}", timestamp, max_timestamp);
+        let search_document = doc! { "hostname" => hostname };
+        let update_timestamp_document = doc! { "timestamp" => max_timestamp };
+        let update_document = doc! { "$set" => update_timestamp_document };
+        let update_options = Some(FindOneAndUpdateOptions {
+            return_document: None,
+            max_time_ms: None,
+            projection: None,
+            sort: None,
+            upsert: Some(true),
+            write_concern: None,
+        });
+
+        try!(tipup_db.collection("last_seen_result").find_one_and_update(search_document, update_document, update_options));
     }
 
     Ok(())
