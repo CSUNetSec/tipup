@@ -1,3 +1,4 @@
+use bson::Bson;
 use bson::ordered::OrderedDocument;
 
 use error::TipupError;
@@ -31,6 +32,40 @@ impl FlagManager {
     }
 }
 
-pub fn create_flag(document: &OrderedDocument, level: u8, internal_error: bool) -> Result<Flag, TipupError> {
-    unimplemented!();
+pub fn create_flag(document: &OrderedDocument, level: u8, internal_error: bool, analyzer: &str) -> Result<Flag, TipupError> {
+    let timestamp = match document.get("timestamp") {
+        Some(&Bson::I64(timestamp)) => timestamp,
+        _ => return Err(TipupError::from("failed to parse timestamp as i64")),
+    };
+
+    let domain_ip_address = match document.get("result") {
+        Some(&Bson::Document(ref result_document)) => {
+            match result_document.get("domain_ip") {
+                Some(&Bson::String(ref domain_ip)) => Some(domain_ip.to_owned()),
+                _ => None,
+            }
+        },
+        _ => None,
+    };
+
+    Ok(
+        Flag {
+            timestamp: timestamp,
+            hostname: try!(parse_string(document, "hostname")),
+            ip_address: try!(parse_string(document, "ip_address")),
+            domain: try!(parse_string(document, "domain")),
+            domain_ip_address: domain_ip_address,
+            url: try!(parse_string(document, "url")),
+            level: level,
+            internal_error: internal_error,
+            analyzer: analyzer.to_owned(),
+        }
+    )
+}
+
+fn parse_string(document: &OrderedDocument, name: &str) -> Result<String, TipupError> {
+    match document.get(name) {
+        Some(&Bson::String(ref value)) => Ok(value.to_owned()),
+        _ => Err(TipupError::from("failed to parse hostname as string")),
+    }
 }

@@ -128,8 +128,8 @@ fn load_analyzers(tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>) -> Res
 
         //create analyzer
         let analyzer = match class.as_ref() {
-            "BayesianAnalyzer" => Box::new(try!(BayesianAnalyzer::new(parameters, tx.clone()))) as Box<Analyzer>,
-            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(parameters, tx.clone()))) as Box<Analyzer>,
+            "BayesianAnalyzer" => Box::new(try!(BayesianAnalyzer::new(name, parameters, tx.clone()))) as Box<Analyzer>,
+            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(name, parameters, tx.clone()))) as Box<Analyzer>,
             _ => return Err(TipupError::from("unknown analyzer class")),
         };
 
