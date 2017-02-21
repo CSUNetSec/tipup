@@ -1,6 +1,5 @@
 #[macro_use(bson, doc)]
 extern crate bson;
-extern crate chrono;
 #[macro_use]
 extern crate clap;
 extern crate env_logger;
@@ -10,24 +9,21 @@ extern crate mongodb;
 extern crate time;
 
 use bson::Bson;
-use bson::ordered::OrderedDocument;
-use chrono::offset::utc::UTC;
 use clap::{App, ArgMatches};
 use mongodb::{Client, ClientOptions, ThreadedClient};
 use mongodb::coll::options::{CursorType, FindOneAndUpdateOptions, FindOptions};
 use mongodb::db::{Database, ThreadedDatabase};
 
 mod analyzer;
-mod demultiplexor;
+mod pipe;
 mod error;
 mod flag_manager;
 
 use analyzer::{Analyzer, BayesianAnalyzer, ErrorAnalyzer};
-use demultiplexor::Demultiplexor;
+use pipe::Pipe;
 use error::TipupError;
 use flag_manager::{Flag, FlagManager};
 
-use std::collections::HashMap;
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -78,25 +74,25 @@ fn main() {
         }
     });
 
-    //create new demultiplexor
-    let mut demultiplexor = Demultiplexor::new();
+    //create new pipe
+    let mut pipe = Pipe::new();
     let tipup_db = client.db("tipup");
     if let Err(e) = tipup_db.auth(&username, &password) {
         panic!("{}", e);
     }
 
-    if let Err(e) = load_analyzers(&tipup_db, &mut demultiplexor, tx) {
+    if let Err(e) = load_analyzers(&tipup_db, &mut pipe, tx) {
         panic!("{}", e);
     }
 
-    //demultiplexor loop
+    //fetch results loop
     let proddle_db = client.db("proddle");
     if let Err(e) = proddle_db.auth(&username, &password) {
         panic!("{}", e);
     }
 
     loop {
-        if let Err(e) = fetch_results(&proddle_db, &tipup_db, &demultiplexor) {
+        if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe) {
             panic!("{}", e);
         }
 
@@ -104,7 +100,7 @@ fn main() {
     }
 }
 
-fn load_analyzers(tipup_db: &Database, demultiplexor: &mut Demultiplexor, tx: Sender<Flag>) -> Result<(), TipupError> {
+fn load_analyzers(tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>) -> Result<(), TipupError> {
     //query mongodb for analyzer definitions
     let cursor = try!(tipup_db.collection("analyzers").find(None, None));
     for document in cursor {
@@ -137,14 +133,14 @@ fn load_analyzers(tipup_db: &Database, demultiplexor: &mut Demultiplexor, tx: Se
             _ => return Err(TipupError::from("unknown analyzer class")),
         };
 
-        //add analyzer to demultiplexor
-        try!(demultiplexor.add_analyzer(name.to_owned(), measurement.to_owned(), analyzer));
+        //add analyzer to pipe
+        try!(pipe.add_analyzer(name.to_owned(), measurement.to_owned(), analyzer));
     }
 
     Ok(())
 }
 
-fn fetch_results(proddle_db: &Database, tipup_db: &Database, demultiplexor: &Demultiplexor) -> Result<(), TipupError> {
+fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe) -> Result<(), TipupError> {
     //iterate over distinct hostnames for results
     let hostname_cursor = try!(proddle_db.collection("results").distinct("hostname", None, None));
     for hostname_document in hostname_cursor {
@@ -197,7 +193,7 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, demultiplexor: &Dem
         let mut max_timestamp = -1;
         for document in cursor {
             let document = try!(document);
-            if let Err(e) = demultiplexor.send_result(&document) {
+            if let Err(e) = pipe.send_result(&document) {
                 panic!("document:{:?} err:{}", document, e);
             }
 

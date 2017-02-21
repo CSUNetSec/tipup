@@ -7,13 +7,13 @@ use error::TipupError;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-pub struct Demultiplexor {
+pub struct Pipe {
     analyzers: Arc<Mutex<HashMap<String, HashMap<String, Box<Analyzer>>>>>,
 }
 
-impl Demultiplexor {
-    pub fn new() -> Demultiplexor {
-        Demultiplexor {
+impl Pipe {
+    pub fn new() -> Pipe {
+        Pipe {
             analyzers: Arc::new(Mutex::new(HashMap::new())),
         }
     }

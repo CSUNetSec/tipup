@@ -1,7 +1,6 @@
 extern crate clap;
 extern crate mongodb;
 
-use std;
 use std::fmt::{Display, Formatter, Result};
 
 #[derive(Debug)]

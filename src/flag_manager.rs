@@ -7,14 +7,8 @@ pub struct Flag {
     ip_address: String,
     domain: String,
     url: String,
-    level: Level,
+    level: u8,
     analyzer: String,
-}
-
-#[derive(Debug)]
-pub enum Level {
-    SEVERE,
-    WARNING,
 }
 
 pub struct FlagManager {
