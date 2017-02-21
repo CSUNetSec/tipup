@@ -15,9 +15,15 @@ pub struct Flag {
     domain: String,
     domain_ip_address: Option<String>,
     url: String,
-    level: u8, //1-10 value for flag severity
-    internal_error: bool,
+    status: FlagStatus,
     analyzer: String, //name of analyzer
+}
+
+#[derive(Debug)]
+pub enum FlagStatus {
+    Unreachable,
+    Warning,
+    Internal,
 }
 
 impl ToJson for Flag {
@@ -31,15 +37,18 @@ impl ToJson for Flag {
             map.insert(String::from("domain_ip_address"), domain_ip_address.to_json());
         }
         map.insert(String::from("url"), self.url.to_json());
-        map.insert(String::from("level"), self.level.to_json());
-        map.insert(String::from("internal_error"), self.internal_error.to_json());
+        let _ = match self.status {
+            FlagStatus::Unreachable => map.insert(String::from("status"), "unreachable".to_json()),
+            FlagStatus::Warning => map.insert(String::from("status"), "warning".to_json()),
+            FlagStatus::Internal => map.insert(String::from("status"), "internal".to_json()),
+        };
         map.insert(String::from("analyzer"), self.analyzer.to_json());
         Json::Object(map)
     }
 }
 
 impl Flag {
-    pub fn new(document: &OrderedDocument, level: u8, internal_error: bool, analyzer: &str) -> Result<Flag, TipupError> {
+    pub fn new(document: &OrderedDocument, status: FlagStatus, analyzer: &str) -> Result<Flag, TipupError> {
         let timestamp = match document.get("timestamp") {
             Some(&Bson::I64(timestamp)) => timestamp,
             _ => return Err(TipupError::from("failed to parse timestamp as i64")),
@@ -63,8 +72,7 @@ impl Flag {
                 domain: try!(parse_string(document, "domain")),
                 domain_ip_address: domain_ip_address,
                 url: try!(parse_string(document, "url")),
-                level: level,
-                internal_error: internal_error,
+                status: status,
                 analyzer: analyzer.to_owned(),
             }
         )
