@@ -103,9 +103,11 @@ fn main() {
 
     //fetch results loop
     loop {
+        print!("{}: fetching new results - ", time::now_utc().to_timespec().sec);
         if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe) {
             panic!("{}", e);
         }
+        println!("complete");
 
         std::thread::sleep(Duration::new(300, 0))
     }
@@ -215,20 +217,21 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe) -> Res
         }
 
         //update tipup db with most recenlty seen result timestamp
-        println!("timestamp:{} max_timestamp:{}", timestamp, max_timestamp);
-        let search_document = doc! { "hostname" => hostname };
-        let update_timestamp_document = doc! { "timestamp" => max_timestamp };
-        let update_document = doc! { "$set" => update_timestamp_document };
-        let update_options = Some(FindOneAndUpdateOptions {
-            return_document: None,
-            max_time_ms: None,
-            projection: None,
-            sort: None,
-            upsert: Some(true),
-            write_concern: None,
-        });
+        if timestamp != max_timestamp {
+            let search_document = doc! { "hostname" => hostname };
+            let update_timestamp_document = doc! { "timestamp" => max_timestamp };
+            let update_document = doc! { "$set" => update_timestamp_document };
+            let update_options = Some(FindOneAndUpdateOptions {
+                return_document: None,
+                max_time_ms: None,
+                projection: None,
+                sort: None,
+                upsert: Some(true),
+                write_concern: None,
+            });
 
-        try!(tipup_db.collection("last_seen_result").find_one_and_update(search_document, update_document, update_options));
+            try!(tipup_db.collection("last_seen_result").find_one_and_update(search_document, update_document, update_options));
+        }
     }
 
     Ok(())
