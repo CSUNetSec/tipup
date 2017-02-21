@@ -6,6 +6,7 @@ extern crate env_logger;
 #[macro_use]
 extern crate log;
 extern crate mongodb;
+extern crate rustc_serialize;
 extern crate time;
 
 use bson::Bson;
@@ -58,10 +59,36 @@ fn main() {
         Err(e) => panic!("{}", e),
     };
 
-    //create flag manager and start
+    let (tipup_db, proddle_db) = (client.db("tipup"), client.db("proddle"));
+    if let Err(e) = tipup_db.auth(&username, &password) {
+        panic!("{}", e);
+    }
+
+    if let Err(e) = proddle_db.auth(&username, &password) {
+        panic!("{}", e);
+    }
+
+    //create new pipe
     let (tx, rx) = std::sync::mpsc::channel();
+    let mut pipe = Pipe::new();
+    if let Err(e) = load_analyzers(&tipup_db, &mut pipe, tx) {
+        panic!("{}", e);
+    }
+
+    //create flag manager and start
     std::thread::spawn(move || {
-        let mut flag_manager = FlagManager::new();
+        let client_options = ClientOptions::with_ssl(&ca_file, &certificate_file, &key_file, true);
+        let client = match Client::connect_with_options(&mongodb_ip_address, mongodb_port, client_options)  {
+            Ok(client) => client,
+            Err(e) => panic!("{}", e),
+        };
+
+        let tipup_db = client.db("tipup");
+        if let Err(e) = tipup_db.auth(&username, &password) {
+            panic!("{}", e);
+        }
+
+        let mut flag_manager = FlagManager::new(&tipup_db);
         loop {
             let flag = match rx.recv() {
                 Ok(flag) => flag,
@@ -74,23 +101,7 @@ fn main() {
         }
     });
 
-    //create new pipe
-    let mut pipe = Pipe::new();
-    let tipup_db = client.db("tipup");
-    if let Err(e) = tipup_db.auth(&username, &password) {
-        panic!("{}", e);
-    }
-
-    if let Err(e) = load_analyzers(&tipup_db, &mut pipe, tx) {
-        panic!("{}", e);
-    }
-
     //fetch results loop
-    let proddle_db = client.db("proddle");
-    if let Err(e) = proddle_db.auth(&username, &password) {
-        panic!("{}", e);
-    }
-
     loop {
         if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe) {
             panic!("{}", e);

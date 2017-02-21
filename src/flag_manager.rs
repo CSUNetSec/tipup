@@ -1,7 +1,11 @@
-use bson::Bson;
+use bson::{Bson, Document};
 use bson::ordered::OrderedDocument;
+use mongodb::db::{Database, ThreadedDatabase};
+use rustc_serialize::json::{Json, ToJson};
 
 use error::TipupError;
+
+use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub struct Flag {
@@ -16,51 +20,55 @@ pub struct Flag {
     analyzer: String, //name of analyzer
 }
 
-pub struct FlagManager {
-}
-
-impl FlagManager {
-    pub fn new() -> FlagManager {
-        FlagManager {
+impl ToJson for Flag {
+    fn to_json(&self) -> Json {
+        let mut map = BTreeMap::new();
+        map.insert(String::from("timestamp"), self.timestamp.to_json());
+        map.insert(String::from("hostname"), self.hostname.to_json());
+        map.insert(String::from("ip_address"), self.ip_address.to_json());
+        map.insert(String::from("domain"), self.domain.to_json());
+        if let Some(ref domain_ip_address) = self.domain_ip_address {
+            map.insert(String::from("domain_ip_address"), domain_ip_address.to_json());
         }
-    }
-
-    pub fn process_flag(&mut self, flag: &Flag) -> Result<(), TipupError> {
-        println!("TODO PROCESS FLAG: {:?}", flag);
-
-        Ok(())
+        map.insert(String::from("url"), self.url.to_json());
+        map.insert(String::from("level"), self.level.to_json());
+        map.insert(String::from("internal_error"), self.internal_error.to_json());
+        map.insert(String::from("analyzer"), self.analyzer.to_json());
+        Json::Object(map)
     }
 }
 
-pub fn create_flag(document: &OrderedDocument, level: u8, internal_error: bool, analyzer: &str) -> Result<Flag, TipupError> {
-    let timestamp = match document.get("timestamp") {
-        Some(&Bson::I64(timestamp)) => timestamp,
-        _ => return Err(TipupError::from("failed to parse timestamp as i64")),
-    };
+impl Flag {
+    pub fn new(document: &OrderedDocument, level: u8, internal_error: bool, analyzer: &str) -> Result<Flag, TipupError> {
+        let timestamp = match document.get("timestamp") {
+            Some(&Bson::I64(timestamp)) => timestamp,
+            _ => return Err(TipupError::from("failed to parse timestamp as i64")),
+        };
 
-    let domain_ip_address = match document.get("result") {
-        Some(&Bson::Document(ref result_document)) => {
-            match result_document.get("domain_ip") {
-                Some(&Bson::String(ref domain_ip)) => Some(domain_ip.to_owned()),
-                _ => None,
+        let domain_ip_address = match document.get("result") {
+            Some(&Bson::Document(ref result_document)) => {
+                match result_document.get("domain_ip") {
+                    Some(&Bson::String(ref domain_ip)) => Some(domain_ip.to_owned()),
+                    _ => None,
+                }
+            },
+            _ => None,
+        };
+
+        Ok(
+            Flag {
+                timestamp: timestamp,
+                hostname: try!(parse_string(document, "hostname")),
+                ip_address: try!(parse_string(document, "ip_address")),
+                domain: try!(parse_string(document, "domain")),
+                domain_ip_address: domain_ip_address,
+                url: try!(parse_string(document, "url")),
+                level: level,
+                internal_error: internal_error,
+                analyzer: analyzer.to_owned(),
             }
-        },
-        _ => None,
-    };
-
-    Ok(
-        Flag {
-            timestamp: timestamp,
-            hostname: try!(parse_string(document, "hostname")),
-            ip_address: try!(parse_string(document, "ip_address")),
-            domain: try!(parse_string(document, "domain")),
-            domain_ip_address: domain_ip_address,
-            url: try!(parse_string(document, "url")),
-            level: level,
-            internal_error: internal_error,
-            analyzer: analyzer.to_owned(),
-        }
-    )
+        )
+    }
 }
 
 fn parse_string(document: &OrderedDocument, name: &str) -> Result<String, TipupError> {
@@ -69,3 +77,29 @@ fn parse_string(document: &OrderedDocument, name: &str) -> Result<String, TipupE
         _ => Err(TipupError::from("failed to parse hostname as string")),
     }
 }
+
+pub struct FlagManager<'a> {
+    tipup_db: &'a Database,
+}
+
+impl<'a> FlagManager<'a> {
+    pub fn new(tipup_db: &'a Database) -> FlagManager {
+        FlagManager {
+            tipup_db: tipup_db,
+        }
+    }
+
+    pub fn process_flag(&mut self, flag: &Flag) -> Result<(), TipupError> {
+        //write to database
+        let json = flag.to_json();
+        let document: Document = match Bson::from_json(&json) {
+            Bson::Document(document) => document,
+            _ => return Err(TipupError::from("failed to parse flag json as Bson::Document")),
+        };
+
+        try!(self.tipup_db.collection("flags").insert_one(document, None));
+
+        Ok(())
+    }
+}
+
