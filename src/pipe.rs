@@ -37,9 +37,9 @@ impl Pipe {
         };
 
         //send to analyzers registered to that measurement
-        let analyzers = self.analyzers.lock().unwrap();
+        let mut analyzers = self.analyzers.lock().unwrap();
         if analyzers.contains_key(measurement) {
-            for analyzer in analyzers.get(measurement).unwrap().values() {
+            for analyzer in analyzers.get_mut(measurement).unwrap().values_mut() {
                 try!(analyzer.process_result(document));
             }
         }

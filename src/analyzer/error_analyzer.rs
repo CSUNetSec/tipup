@@ -13,7 +13,7 @@ pub struct ErrorAnalyzer {
 }
 
 impl ErrorAnalyzer {
-    pub fn new(name: &str, _: &Vec<Bson>, tx: Sender<Flag>) -> Result<ErrorAnalyzer, TipupError> {
+    pub fn new(name: &str, tx: Sender<Flag>) -> Result<ErrorAnalyzer, TipupError> {
         Ok(
             ErrorAnalyzer {
                 name: name.to_owned(),
@@ -24,7 +24,7 @@ impl ErrorAnalyzer {
 }
 
 impl Analyzer for ErrorAnalyzer {
-    fn process_result(&self, document: &OrderedDocument) -> Result<(), TipupError> {
+    fn process_result(&mut self, document: &OrderedDocument) -> Result<(), TipupError> {
         //check for internal error
         if let Some(&Bson::Boolean(true)) = document.get("error") {
             let flag = try!(Flag::new(document, FlagStatus::Internal, &self.name));

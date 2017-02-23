@@ -20,7 +20,7 @@ mod pipe;
 mod error;
 mod flag_manager;
 
-use analyzer::{Analyzer, BayesianAnalyzer, ErrorAnalyzer};
+use analyzer::{Analyzer, ErrorAnalyzer, StdDevAnalyzer};
 use pipe::Pipe;
 use error::TipupError;
 use flag_manager::{Flag, FlagManager};
@@ -71,7 +71,7 @@ fn main() {
     //create new pipe
     let (tx, rx) = std::sync::mpsc::channel();
     let mut pipe = Pipe::new();
-    if let Err(e) = load_analyzers(&tipup_db, &mut pipe, tx) {
+    if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, tx) {
         panic!("{}", e);
     }
 
@@ -113,7 +113,7 @@ fn main() {
     }
 }
 
-fn load_analyzers(tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>) -> Result<(), TipupError> {
+fn load_analyzers(proddle_db: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>) -> Result<(), TipupError> {
     //query mongodb for analyzer definitions
     let cursor = try!(tipup_db.collection("analyzers").find(None, None));
     for document in cursor {
@@ -135,14 +135,14 @@ fn load_analyzers(tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>) -> Res
         };
 
         let parameters = match document.get("parameters") {
-            Some(&Bson::Array(ref parameters)) => parameters,
+            Some(&Bson::Document(ref parameters)) => parameters,
             _ => return Err(TipupError::from("failed to parse analyzer parameters")),
         };
 
         //create analyzer
         let analyzer = match class.as_ref() {
-            "BayesianAnalyzer" => Box::new(try!(BayesianAnalyzer::new(name, parameters, tx.clone()))) as Box<Analyzer>,
-            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(name, parameters, tx.clone()))) as Box<Analyzer>,
+            "StdDevAnalyzer" => Box::new(try!(StdDevAnalyzer::new(name, parameters, proddle_db, tx.clone()))) as Box<Analyzer>,
+            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(name, tx.clone()))) as Box<Analyzer>,
             _ => return Err(TipupError::from("unknown analyzer class")),
         };
 
