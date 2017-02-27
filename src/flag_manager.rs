@@ -1,11 +1,20 @@
+use bson;
 use bson::{Bson, Document};
 use bson::ordered::OrderedDocument;
 use mongodb::db::{Database, ThreadedDatabase};
 use rustc_serialize::json::{Json, ToJson};
+use serde::ser::{Serialize, Serializer, SerializeStruct};
 
 use error::TipupError;
 
 use std::collections::BTreeMap;
+
+#[derive(Debug)]
+pub enum FlagStatus {
+    Unreachable,
+    Warning,
+    Internal,
+}
 
 #[derive(Debug)]
 pub struct Flag {
@@ -19,11 +28,23 @@ pub struct Flag {
     analyzer: String, //name of analyzer
 }
 
-#[derive(Debug)]
-pub enum FlagStatus {
-    Unreachable,
-    Warning,
-    Internal,
+impl Serialize for Flag {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S:Serializer {
+        let mut struc = serializer.serialize_struct("thidausn", 8)?;
+        struc.serialize_field("t", &self.timestamp)?;
+        struc.serialize_field("h", &self.hostname)?;
+        struc.serialize_field("i", &self.ip_address)?;
+        struc.serialize_field("d", &self.domain)?;
+        struc.serialize_field("a", &self.domain_ip_address)?;
+        struc.serialize_field("u", &self.url)?;
+        match self.status {
+            FlagStatus::Unreachable => struc.serialize_field("s", "unreachable")?,
+            FlagStatus::Warning => struc.serialize_field("s", "warning")?,
+            FlagStatus::Internal => struc.serialize_field("s", "internal")?,
+        }
+        struc.serialize_field("n", &self.analyzer)?;
+        struc.end()
+    }
 }
 
 impl ToJson for Flag {
@@ -99,9 +120,8 @@ impl<'a> FlagManager<'a> {
 
     pub fn process_flag(&mut self, flag: &Flag) -> Result<(), TipupError> {
         //write to database
-        let json = flag.to_json();
-        let document: Document = match Bson::from_json(&json) {
-            Bson::Document(document) => document,
+        let document: Document = match bson::to_bson(flag) {
+            Ok(Bson::Document(document)) => document,
             _ => return Err(TipupError::from("failed to parse flag json as Bson::Document")),
         };
 
@@ -110,4 +130,3 @@ impl<'a> FlagManager<'a> {
         Ok(())
     }
 }
-

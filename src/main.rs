@@ -7,6 +7,7 @@ extern crate env_logger;
 extern crate log;
 extern crate mongodb;
 extern crate rustc_serialize;
+extern crate serde;
 extern crate time;
 
 use bson::Bson;

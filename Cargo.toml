@@ -4,10 +4,11 @@ version = "0.1.0"
 authors = ["Dan Rammer <hamersaw@bushpath.com>"]
 
 [dependencies]
-bson = "0.3"
+bson = "0.4"
 clap = {version = "2.19", features = ["yaml"]}
 env_logger = "0.3"
 log = "0.3"
-mongodb = { version = "0.2.1", features = ["ssl"]}
+mongodb = { version = "0.2", features = ["ssl"]}
 rustc-serialize = "0.3"
+serde = "0.9"
 time = "0.1"
