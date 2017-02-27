@@ -17,15 +17,18 @@ use mongodb::coll::options::{CursorType, FindOneAndUpdateOptions, FindOptions};
 use mongodb::db::{Database, ThreadedDatabase};
 
 mod analyzer;
-mod pipe;
 mod error;
 mod flag_manager;
+mod pipe;
+mod result_window;
 
 use analyzer::{Analyzer, ErrorAnalyzer, StdDevAnalyzer};
-use pipe::Pipe;
 use error::TipupError;
 use flag_manager::{Flag, FlagManager};
+use pipe::Pipe;
+use result_window::ResultWindow;
 
+use std::sync::{Arc, RwLock};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
@@ -69,10 +72,19 @@ fn main() {
         panic!("{}", e);
     }
 
+    //populate result window
+    let result_window = Arc::new(RwLock::new(ResultWindow::new()));
+    {
+        let mut result_window = result_window.write().unwrap();
+         if let Err(e) = populate_result_window(&proddle_db, &tipup_db, &mut result_window) {
+            panic!("{}", e);
+         }
+    }
+
     //create new pipe
     let (tx, rx) = std::sync::mpsc::channel();
     let mut pipe = Pipe::new();
-    if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, tx) {
+    if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, tx, result_window) {
         panic!("{}", e);
     }
 
@@ -114,7 +126,20 @@ fn main() {
     }
 }
 
-fn load_analyzers(proddle_db: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>) -> Result<(), TipupError> {
+fn populate_result_window(proddle_db: &Database, _: &Database, result_window: &mut ResultWindow) -> Result<(), TipupError> {
+    //TODO get values from tipup.last_seen_result and use to determine if result is too recent
+
+    let start_time = time::now_utc().to_timespec().sec - (60 * 60 * 24 * 5);
+    let timestamp_gte = doc!("$gte" => start_time);
+    let search_document = Some(doc!("timestamp" => timestamp_gte));
+    for document in try!(proddle_db.collection("results").find(search_document, None)) {
+        try!(result_window.add_result(try!(document)));
+    }
+
+    Ok(())
+}
+
+fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
     //query mongodb for analyzer definitions
     let cursor = try!(tipup_db.collection("analyzers").find(None, None));
     for document in cursor {
@@ -142,8 +167,8 @@ fn load_analyzers(proddle_db: &Database, tipup_db: &Database, pipe: &mut Pipe, t
 
         //create analyzer
         let analyzer = match class.as_ref() {
-            "StdDevAnalyzer" => Box::new(try!(StdDevAnalyzer::new(name, parameters, proddle_db, tx.clone()))) as Box<Analyzer>,
             "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(name, tx.clone()))) as Box<Analyzer>,
+            "StdDevAnalyzer" => Box::new(try!(StdDevAnalyzer::new(name, parameters, result_window.clone(), tx.clone()))) as Box<Analyzer>,
             _ => return Err(TipupError::from("unknown analyzer class")),
         };
 

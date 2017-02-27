@@ -1,23 +1,23 @@
 use bson::Bson;
 use bson::ordered::OrderedDocument;
-use mongodb::db::{Database, ThreadedDatabase};
 
 use analyzer::Analyzer;
 use error::TipupError;
 use flag_manager::{Flag, FlagStatus};
+use result_window::ResultWindow;
 
-use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 use std::sync::mpsc::Sender;
 
 pub struct StdDevAnalyzer {
     name: String,
     variable_name: Vec<String>,
-    variable_values: HashMap<String,HashMap<String,Vec<f64>>>, //<vantage,<url,[values]>>
+    result_window: Arc<RwLock<ResultWindow>>,
     tx: Sender<Flag>,
 }
 
 impl StdDevAnalyzer {
-    pub fn new(name: &str, parameters: &OrderedDocument, proddle_db: &Database, tx: Sender<Flag>) -> Result<StdDevAnalyzer, TipupError> {
+    pub fn new(name: &str, parameters: &OrderedDocument, result_window: Arc<RwLock<ResultWindow>>, tx: Sender<Flag>, ) -> Result<StdDevAnalyzer, TipupError> {
         //parse parameters to retrieve variable name
         let variable_name = match parameters.get("variable_name") {
             Some(&Bson::Array(ref param_variable_name)) => {
@@ -34,65 +34,11 @@ impl StdDevAnalyzer {
             _ => return Err(TipupError::from("failed to parse variable name parameter in StdDevAnalyzer")),
         };
 
-        //query proddle_db to get information on variable
-        //db.results.aggregate([{$match:{measurement:'http-get',timestamp:{$gte:1487785053}}},{$group:{_id:{hostname:'$hostname',url:'$url'},values:{$push:'$result.application_layer_latency'}}}])
-        let mut variable_values = HashMap::new();
-
-        let timestamp_gte = doc!("$gte" => 1234); //TODO get last week
-        let match_doc = doc!("measurement" => "http-get", "timestamp" => timestamp_gte);
-        let id_doc = doc!("hostname" => "$hostname", "url" => "$url");
-        let values_doc = doc!("$push" => "$result.application_layer_latency");
-        let group_doc = doc!("_id" => id_doc, "values" => values_doc);
-        let aggregate_doc = vec!(
-            doc!("$match" => match_doc),
-            doc!("$group" => group_doc),
-        );
-
-        for document in try!(proddle_db.collection("results").aggregate(aggregate_doc, None)) {
-            //retrieve variable values from bson document
-            let document = try!(document);
-
-            let id_document = match document.get("_id") {
-                Some(&Bson::Document(ref id_document)) => id_document,
-                _ => continue,
-            };
-
-            let hostname = match id_document.get("hostname") {
-                Some(&Bson::String(ref hostname)) => hostname.to_owned(),
-                _ => continue,
-            };
-
-            let url = match id_document.get("url") {
-                Some(&Bson::String(ref url)) => url.to_owned(),
-                _ => continue,
-            };
-
-            let values = match document.get("values") {
-                Some(&Bson::Array(ref array)) => {
-                    let mut values = Vec::new();
-                    for value in array {
-                        match value {
-                            &Bson::FloatingPoint(f) => values.push(f),
-                            &Bson::I32(i) => values.push(i as f64),
-                            &Bson::I64(i) => values.push(i as f64),
-                            _ => continue,
-                        }
-                    }
-
-                    values
-                },
-                _ => continue,
-            };
-
-            //insert values into variable values map
-            variable_values.entry(hostname).or_insert(HashMap::new()).insert(url, values);
-        }
-
         Ok(
             StdDevAnalyzer {
                 name: name.to_owned(),
                 variable_name: variable_name,
-                variable_values: variable_values,
+                result_window: result_window,
                 tx: tx,
             }
         )
@@ -117,9 +63,21 @@ impl Analyzer for StdDevAnalyzer {
             None => return Ok(()),
         };
 
-        //get list of values from variable values map
-        let url_map = self.variable_values.entry(hostname).or_insert(HashMap::new());
-        let values = url_map.entry(url).or_insert(Vec::new());
+        //get list of values from result window
+        let mut values = Vec::new();
+        {
+            let result_window = self.result_window.read().unwrap();
+            match result_window.get_results(&hostname, &url) {
+                Some(results) => {
+                    for result_document in results {
+                        if let Some(value) = get_value(result_document, &self.variable_name) {
+                            values.push(value);
+                        }
+                    }
+                },
+                None => return Ok(())
+            }
+        }
 
         //compute standard deviation of variable
         let mut mean = 0.0;
