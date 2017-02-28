@@ -1,5 +1,7 @@
 use bson::Bson;
 use bson::ordered::OrderedDocument;
+use mongodb::db::{Database, ThreadedDatabase};
+use time;
 
 use error::TipupError;
 
@@ -32,6 +34,17 @@ impl ResultWindow {
         let variable_window = Arc::new(RwLock::new(VariableWindow::new(variable_name.to_owned())));
         self.variable_windows.push(variable_window.clone());
         Ok(variable_window)
+    }
+
+    pub fn initialize(&mut self, proddle_db: &Database) -> Result<(), TipupError> {
+        for variable_window in self.variable_windows.iter() {
+            {
+                let mut variable_window = variable_window.write().unwrap();
+                try!(variable_window.initialize(proddle_db));
+            }
+        }
+
+        Ok(())
     }
 
     pub fn add_result(&mut self, document: OrderedDocument) -> Result<(), TipupError> {
@@ -67,14 +80,69 @@ pub struct VariableWindow {
 }
 
 impl VariableWindow {
-    pub fn new(variable_name: Vec<String>) -> VariableWindow {
+    fn new(variable_name: Vec<String>) -> VariableWindow {
         VariableWindow {
             variable_name: variable_name,
             values: HashMap::new(),
         }
     }
 
-    pub fn add_result(&mut self, hostname: &str, url: &str, document: &OrderedDocument) -> Result<(), TipupError> {
+    fn initialize(&mut self, proddle_db: &Database) -> Result<(), TipupError> {
+        let start_time = time::now_utc().to_timespec().sec - (60 * 60 * 24 * 5);
+        let timestamp_gte = doc!("$gte" => start_time);
+        let match_doc = doc!("measurement" => "http-get", "timestamp" => timestamp_gte);
+        let id_doc = doc!("hostname" => "$hostname", "url" => "$url");
+        let values_doc = doc!("$push" => "$result.application_layer_latency");
+        let group_doc = doc!("_id" => id_doc, "values" => values_doc);
+        let aggregate_doc = vec!(
+            doc!("$match" => match_doc),
+            doc!("$group" => group_doc),
+        );
+
+        for document in try!(proddle_db.collection("results").aggregate(aggregate_doc, None)) {
+            //retrieve variable values from bson document
+            let document = try!(document);
+
+            let id_document = match document.get("_id") {
+                Some(&Bson::Document(ref id_document)) => id_document,
+                _ => continue,
+            };
+
+            let hostname = match id_document.get("hostname") {
+                Some(&Bson::String(ref hostname)) => hostname.to_owned(),
+                _ => continue,
+            };
+
+            let url = match id_document.get("url") {
+                Some(&Bson::String(ref url)) => url.to_owned(),
+                _ => continue,
+            };
+
+            let values = match document.get("values") {
+                Some(&Bson::Array(ref array)) => {
+                    let mut values = Vec::new();
+                    for value in array {
+                        match value {
+                            &Bson::FloatingPoint(f) => values.push(f),
+                            &Bson::I32(i) => values.push(i as f64),
+                            &Bson::I64(i) => values.push(i as f64),
+                            _ => continue,
+                        }
+                    }
+
+                    values
+                },
+                _ => continue,
+            };
+
+            //insert values into variable values map
+            self.values.entry(hostname).or_insert(HashMap::new()).insert(url, values);
+        }
+
+        Ok(())
+    }
+
+    fn add_result(&mut self, hostname: &str, url: &str, document: &OrderedDocument) -> Result<(), TipupError> {
         if let Some(value) = get_value(&self.variable_name, document) {
             let values = self.values.entry(hostname.to_owned()).or_insert(HashMap::new()).entry(url.to_owned()).or_insert(Vec::new());
             values.push(value);
@@ -96,7 +164,7 @@ impl VariableWindow {
         None
     }
 
-    pub fn variable_name_equals(&self, variable_name: &Vec<String>) -> bool {
+    fn variable_name_equals(&self, variable_name: &Vec<String>) -> bool {
         //check length
         if self.variable_name.len() != variable_name.len() {
             return false;
@@ -113,7 +181,7 @@ impl VariableWindow {
     }
 }
 
-pub fn get_value(variable_name: &Vec<String>, document: &OrderedDocument) -> Option<f64> {
+fn get_value(variable_name: &Vec<String>, document: &OrderedDocument) -> Option<f64> {
     let mut index_document = document;
     for variable in variable_name {
         match index_document.get(variable) {

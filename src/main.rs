@@ -109,7 +109,7 @@ fn main() {
     //populate result window
     {
         let mut result_window = result_window.write().unwrap();
-        if let Err(e) = populate_result_window(&proddle_db, &tipup_db, &mut result_window) {
+        if let Err(e) = result_window.initialize(&proddle_db) {
            panic!("{}", e);
         }
     }
@@ -117,26 +117,13 @@ fn main() {
     //fetch results loop
     loop {
         print!("{}: fetching new results - ", time::now_utc().to_timespec().sec);
-        if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe) {
+        if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe, result_window.clone()) {
             panic!("{}", e);
         }
         println!("complete");
 
         std::thread::sleep(Duration::new(300, 0))
     }
-}
-
-fn populate_result_window(proddle_db: &Database, _: &Database, result_window: &mut ResultWindow) -> Result<(), TipupError> {
-    //TODO get values from tipup.last_seen_result and use to determine if result is too recent
-
-    let start_time = time::now_utc().to_timespec().sec - (60 * 60 * 24 * 5);
-    let timestamp_gte = doc!("$gte" => start_time);
-    let search_document = Some(doc!("timestamp" => timestamp_gte));
-    for document in try!(proddle_db.collection("results").find(search_document, None)) {
-        try!(result_window.add_result(try!(document)));
-    }
-
-    Ok(())
 }
 
 fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
@@ -179,7 +166,7 @@ fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender
     Ok(())
 }
 
-fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe) -> Result<(), TipupError> {
+fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
     //iterate over distinct hostnames for results
     let hostname_cursor = try!(proddle_db.collection("results").distinct("hostname", None, None));
     for hostname_document in hostname_cursor {
@@ -239,6 +226,12 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe) -> Res
             match document.get("timestamp") {
                 Some(&Bson::I64(result_timestamp)) => max_timestamp = std::cmp::max(max_timestamp, result_timestamp),
                 _ => return Err(TipupError::from("failed to parse 'timestamp' value in result")),
+            }
+
+            //add result to result window
+            {
+                let mut result_window = result_window.write().unwrap();
+                try!(result_window.add_result(document))
             }
         }
 
