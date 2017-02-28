@@ -34,8 +34,16 @@ impl Analyzer for ErrorAnalyzer {
         //check for measurement error
         if let Some(&Bson::Document(ref result_document)) = document.get("result") {
             if let Some(&Bson::Boolean(true)) = result_document.get("error") {
-                let flag = try!(Flag::new(document, FlagStatus::Unreachable, &self.name));
-                try!(self.tx.send(flag));
+                //check if there we're more attempts
+                let remaining_attempts = match document.get("remaining_attempts") {
+                    Some(&Bson::I32(remaining_attempts)) => remaining_attempts,
+                    _ => -1,
+                };
+
+                if remaining_attempts == 0 {
+                    let flag = try!(Flag::new(document, FlagStatus::Unreachable, &self.name));
+                    try!(self.tx.send(flag)); 
+                }
             }
         }
 
