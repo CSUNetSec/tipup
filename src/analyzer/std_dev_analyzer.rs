@@ -4,7 +4,7 @@ use bson::ordered::OrderedDocument;
 use analyzer::Analyzer;
 use error::TipupError;
 use flag_manager::{Flag, FlagStatus};
-use result_window::ResultWindow;
+use result_window::{ResultWindow, VariableWindow};
 
 use std::sync::{Arc, RwLock};
 use std::sync::mpsc::Sender;
@@ -12,7 +12,7 @@ use std::sync::mpsc::Sender;
 pub struct StdDevAnalyzer {
     name: String,
     variable_name: Vec<String>,
-    result_window: Arc<RwLock<ResultWindow>>,
+    variable_window: Arc<RwLock<VariableWindow>>,
     tx: Sender<Flag>,
 }
 
@@ -34,11 +34,17 @@ impl StdDevAnalyzer {
             _ => return Err(TipupError::from("failed to parse variable name parameter in StdDevAnalyzer")),
         };
 
+        let variable_window;
+        {
+            let mut result_window = result_window.write().unwrap();
+            variable_window = try!(result_window.register_variable(&variable_name));
+        }
+
         Ok(
             StdDevAnalyzer {
                 name: name.to_owned(),
                 variable_name: variable_name,
-                result_window: result_window,
+                variable_window: variable_window,
                 tx: tx,
             }
         )
@@ -58,57 +64,44 @@ impl Analyzer for StdDevAnalyzer {
             _ => return Ok(()),
         };
 
-        let value = match get_value(document, &self.variable_name) {
+        let value = match get_value(&self.variable_name, document) {
             Some(value) => value,
             None => return Ok(()),
         };
 
-        //get list of values from result window
-        let mut values = Vec::new();
         {
-            let result_window = self.result_window.read().unwrap();
-            match result_window.get_results(&hostname, &url) {
-                Some(results) => {
-                    for result_document in results {
-                        if let Some(value) = get_value(result_document, &self.variable_name) {
-                            values.push(value);
-                        }
-                    }
-                },
-                None => return Ok(())
+            //get list of values from result window
+            let variable_window = self.variable_window.read().unwrap();
+            let values: &Vec<f64> = match variable_window.get_values(&hostname, &url) {
+                Some(values) => values,
+                None => return Ok(()),
+            };
+
+            //compute standard deviation of variable
+            let mut mean = 0.0;
+            for v in values.iter() {
+                mean += *v;
             }
-        }
+            mean /= values.len() as f64;
 
-        //compute standard deviation of variable
-        let mut mean = 0.0;
-        for v in values.iter() {
-            mean += *v;
-        }
-        mean /= values.len() as f64;
+            let mut std_dev = 0.0;
+            for v in values.iter() {
+                std_dev += (*v - mean).powf(2.0);
+            }
+            std_dev = std_dev.sqrt();
 
-        let mut std_dev = 0.0;
-        for v in values.iter() {
-            std_dev += (*v - mean).powf(2.0);
-        }
-        std_dev = std_dev.sqrt();
-
-        //if value is greater than 1.5 standard deviations raise warning
-        if value > mean + (1.5 * std_dev) {
-            let flag = try!(Flag::new(document, FlagStatus::Warning, &self.name));
-            try!(self.tx.send(flag));
-        }
-
-        //add value to values vector
-        values.push(value);
-        if values.len() > 10 {
-            let _ = values.remove(0);
+            //if value is greater than 1.5 standard deviations raise warning
+            if value > mean + (1.5 * std_dev) {
+                let flag = try!(Flag::new(document, FlagStatus::Warning, &self.name));
+                try!(self.tx.send(flag));
+            }
         }
 
         Ok(())
     }
 }
 
-fn get_value(document: &OrderedDocument, variable_name: &Vec<String>) -> Option<f64> {
+fn get_value(variable_name: &Vec<String>, document: &OrderedDocument) -> Option<f64> {
     let mut index_document = document;
     for variable in variable_name {
         match index_document.get(variable) {

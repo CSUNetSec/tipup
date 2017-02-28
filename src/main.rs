@@ -72,19 +72,11 @@ fn main() {
         panic!("{}", e);
     }
 
-    //populate result window
-    let result_window = Arc::new(RwLock::new(ResultWindow::new()));
-    {
-        let mut result_window = result_window.write().unwrap();
-         if let Err(e) = populate_result_window(&proddle_db, &tipup_db, &mut result_window) {
-            panic!("{}", e);
-         }
-    }
-
     //create new pipe
+    let result_window = Arc::new(RwLock::new(ResultWindow::new()));
     let (tx, rx) = std::sync::mpsc::channel();
     let mut pipe = Pipe::new();
-    if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, tx, result_window) {
+    if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, tx, result_window.clone()) {
         panic!("{}", e);
     }
 
@@ -113,6 +105,14 @@ fn main() {
             }
         }
     });
+
+    //populate result window
+    {
+        let mut result_window = result_window.write().unwrap();
+        if let Err(e) = populate_result_window(&proddle_db, &tipup_db, &mut result_window) {
+           panic!("{}", e);
+        }
+    }
 
     //fetch results loop
     loop {
