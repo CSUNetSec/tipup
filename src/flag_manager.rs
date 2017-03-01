@@ -31,7 +31,7 @@ impl Serialize for Flag {
         struc.serialize_field("timestamp", &self.timestamp)?;
         struc.serialize_field("hostname", &self.hostname)?;
         struc.serialize_field("ip_address", &self.ip_address)?;
-        struc.serialize_field("domian", &self.domain)?;
+        struc.serialize_field("domain", &self.domain)?;
         struc.serialize_field("domain_ip", &self.domain_ip_address)?;
         struc.serialize_field("url", &self.url)?;
         match self.status {
@@ -101,7 +101,7 @@ impl<'a> FlagManager<'a> {
             _ => return Err(TipupError::from("failed to parse flag json as Bson::Document")),
         };
 
-        try!(self.tipup_db.collection("flags_tmp").insert_one(document, None));
+        try!(self.tipup_db.collection("flags").insert_one(document, None));
 
         Ok(())
     }
