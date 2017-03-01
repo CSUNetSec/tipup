@@ -36,6 +36,7 @@ impl Analyzer for ErrorAnalyzer {
             if let Some(&Bson::Boolean(true)) = result_document.get("error") {
                 //check if there we're more attempts
                 let remaining_attempts = match document.get("remaining_attempts") {
+                    Some(&Bson::I64(remaining_attempts)) => remaining_attempts as i32,
                     Some(&Bson::I32(remaining_attempts)) => remaining_attempts,
                     _ => -1,
                 };

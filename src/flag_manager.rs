@@ -2,12 +2,9 @@ use bson;
 use bson::{Bson, Document};
 use bson::ordered::OrderedDocument;
 use mongodb::db::{Database, ThreadedDatabase};
-use rustc_serialize::json::{Json, ToJson};
 use serde::ser::{Serialize, Serializer, SerializeStruct};
 
 use error::TipupError;
-
-use std::collections::BTreeMap;
 
 #[derive(Debug)]
 pub enum FlagStatus {
@@ -30,41 +27,20 @@ pub struct Flag {
 
 impl Serialize for Flag {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S:Serializer {
-        let mut struc = serializer.serialize_struct("thidausn", 8)?;
-        struc.serialize_field("t", &self.timestamp)?;
-        struc.serialize_field("h", &self.hostname)?;
-        struc.serialize_field("i", &self.ip_address)?;
-        struc.serialize_field("d", &self.domain)?;
-        struc.serialize_field("a", &self.domain_ip_address)?;
-        struc.serialize_field("u", &self.url)?;
+        let mut struc = serializer.serialize_struct("flag", 8)?;
+        struc.serialize_field("timestamp", &self.timestamp)?;
+        struc.serialize_field("hostname", &self.hostname)?;
+        struc.serialize_field("ip_address", &self.ip_address)?;
+        struc.serialize_field("domian", &self.domain)?;
+        struc.serialize_field("domain_ip", &self.domain_ip_address)?;
+        struc.serialize_field("url", &self.url)?;
         match self.status {
-            FlagStatus::Unreachable => struc.serialize_field("s", "unreachable")?,
-            FlagStatus::Warning => struc.serialize_field("s", "warning")?,
-            FlagStatus::Internal => struc.serialize_field("s", "internal")?,
+            FlagStatus::Unreachable => struc.serialize_field("status", "unreachable")?,
+            FlagStatus::Warning => struc.serialize_field("status", "warning")?,
+            FlagStatus::Internal => struc.serialize_field("status", "internal")?,
         }
-        struc.serialize_field("n", &self.analyzer)?;
+        struc.serialize_field("analyzer", &self.analyzer)?;
         struc.end()
-    }
-}
-
-impl ToJson for Flag {
-    fn to_json(&self) -> Json {
-        let mut map = BTreeMap::new();
-        map.insert(String::from("timestamp"), self.timestamp.to_json());
-        map.insert(String::from("hostname"), self.hostname.to_json());
-        map.insert(String::from("ip_address"), self.ip_address.to_json());
-        map.insert(String::from("domain"), self.domain.to_json());
-        if let Some(ref domain_ip_address) = self.domain_ip_address {
-            map.insert(String::from("domain_ip_address"), domain_ip_address.to_json());
-        }
-        map.insert(String::from("url"), self.url.to_json());
-        let _ = match self.status {
-            FlagStatus::Unreachable => map.insert(String::from("status"), "unreachable".to_json()),
-            FlagStatus::Warning => map.insert(String::from("status"), "warning".to_json()),
-            FlagStatus::Internal => map.insert(String::from("status"), "internal".to_json()),
-        };
-        map.insert(String::from("analyzer"), self.analyzer.to_json());
-        Json::Object(map)
     }
 }
 
@@ -125,7 +101,7 @@ impl<'a> FlagManager<'a> {
             _ => return Err(TipupError::from("failed to parse flag json as Bson::Document")),
         };
 
-        try!(self.tipup_db.collection("flags").insert_one(document, None));
+        try!(self.tipup_db.collection("flags_tmp").insert_one(document, None));
 
         Ok(())
     }
