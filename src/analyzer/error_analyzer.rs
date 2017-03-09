@@ -1,23 +1,22 @@
 use bson::Bson;
 use bson::ordered::OrderedDocument;
+use chan::Sender;
 
 use analyzer::Analyzer;
 use error::TipupError;
 use flag_manager::{Flag, FlagStatus};
 
-use std::sync::mpsc::Sender;
-
 pub struct ErrorAnalyzer {
     name: String,
-    tx: Sender<Flag>,
+    flag_tx: Sender<Flag>,
 }
 
 impl ErrorAnalyzer {
-    pub fn new(name: &str, tx: Sender<Flag>) -> Result<ErrorAnalyzer, TipupError> {
+    pub fn new(name: &str, flag_tx: Sender<Flag>) -> Result<ErrorAnalyzer, TipupError> {
         Ok(
             ErrorAnalyzer {
                 name: name.to_owned(),
-                tx: tx,
+                flag_tx: flag_tx,
             }
         )
     }
@@ -28,7 +27,7 @@ impl Analyzer for ErrorAnalyzer {
         //check for internal error
         if let Some(&Bson::Boolean(true)) = document.get("error") {
             let flag = try!(Flag::new(document, FlagStatus::Internal, &self.name));
-            try!(self.tx.send(flag));
+            self.flag_tx.send(flag);
         }
 
         //check for measurement error
@@ -43,7 +42,7 @@ impl Analyzer for ErrorAnalyzer {
 
                 if remaining_attempts == 0 {
                     let flag = try!(Flag::new(document, FlagStatus::Unreachable, &self.name));
-                    try!(self.tx.send(flag)); 
+                    self.flag_tx.send(flag); 
                 }
             }
         }

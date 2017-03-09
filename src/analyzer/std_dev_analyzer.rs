@@ -1,5 +1,6 @@
 use bson::Bson;
 use bson::ordered::OrderedDocument;
+use chan::Sender;
 
 use analyzer::Analyzer;
 use error::TipupError;
@@ -7,17 +8,16 @@ use flag_manager::{Flag, FlagStatus};
 use result_window::{ResultWindow, VariableWindow};
 
 use std::sync::{Arc, RwLock};
-use std::sync::mpsc::Sender;
 
 pub struct StdDevAnalyzer {
     name: String,
     variable_name: Vec<String>,
     variable_window: Arc<RwLock<VariableWindow>>,
-    tx: Sender<Flag>,
+    flag_tx: Sender<Flag>,
 }
 
 impl StdDevAnalyzer {
-    pub fn new(name: &str, parameters: &OrderedDocument, result_window: Arc<RwLock<ResultWindow>>, tx: Sender<Flag>, ) -> Result<StdDevAnalyzer, TipupError> {
+    pub fn new(name: &str, parameters: &OrderedDocument, result_window: Arc<RwLock<ResultWindow>>, flag_tx: Sender<Flag>, ) -> Result<StdDevAnalyzer, TipupError> {
         //parse parameters to retrieve variable name
         let variable_name = match parameters.get("variable_name") {
             Some(&Bson::Array(ref param_variable_name)) => {
@@ -45,7 +45,7 @@ impl StdDevAnalyzer {
                 name: name.to_owned(),
                 variable_name: variable_name,
                 variable_window: variable_window,
-                tx: tx,
+                flag_tx: flag_tx,
             }
         )
     }
@@ -93,7 +93,7 @@ impl Analyzer for StdDevAnalyzer {
             //if value is greater than 1.5 standard deviations raise warning
             if value > mean + (1.5 * std_dev) {
                 let flag = try!(Flag::new(document, FlagStatus::Warning, &self.name));
-                try!(self.tx.send(flag));
+                self.flag_tx.send(flag);
             }
         }
 

@@ -5,6 +5,7 @@ authors = ["Dan Rammer <hamersaw@bushpath.com>"]
 
 [dependencies]
 bson = "0.4"
+chan = "0.1"
 clap = {version = "2.19", features = ["yaml"]}
 mongodb = { version = "0.2", features = ["ssl"]}
 rustc-serialize = "0.3"

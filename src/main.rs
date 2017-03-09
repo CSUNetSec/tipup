@@ -1,5 +1,6 @@
 #[macro_use(bson, doc)]
 extern crate bson;
+extern crate chan;
 #[macro_use]
 extern crate clap;
 extern crate mongodb;
@@ -13,6 +14,7 @@ extern crate slog_term;
 extern crate time;
 
 use bson::Bson;
+use chan::Sender;
 use clap::{App, ArgMatches};
 use mongodb::{Client, ClientInner, ClientOptions, ThreadedClient};
 use mongodb::coll::options::{CursorType, FindOneAndUpdateOptions, FindOptions};
@@ -32,7 +34,7 @@ use pipe::Pipe;
 use result_window::ResultWindow;
 
 use std::sync::{Arc, RwLock};
-use std::sync::mpsc::Sender;
+//use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 fn parse_args(matches: &ArgMatches) -> Result<(String, u16, String, String, String, String, String), TipupError> {
@@ -76,9 +78,9 @@ fn main() {
 
     //create new pipe
     let result_window = Arc::new(RwLock::new(ResultWindow::new()));
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (flag_tx, flag_rx) = chan::sync(0);
     let mut pipe = Pipe::new();
-    if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, tx, result_window.clone()) {
+    if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, flag_tx, result_window.clone()) {
         panic!("{}", e);
     }
 
@@ -96,11 +98,7 @@ fn main() {
 
         let mut flag_manager = FlagManager::new(&tipup_db);
         loop {
-            let flag = match rx.recv() {
-                Ok(flag) => flag,
-                Err(e) => panic!("{}", e),
-            };
-
+            let flag = flag_rx.recv().unwrap();
             if let Err(e) = flag_manager.process_flag(&flag) {
                 panic!("{}", e);
             }
@@ -135,7 +133,7 @@ fn initialize_mongodb_client(mongodb_ip_address: &str, mongodb_port: u16, ca_fil
     }
 }
 
-fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
+fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, flag_tx: Sender<Flag>, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
     //query mongodb for analyzer definitions
     let mut count = 0;
     let cursor = try!(tipup_db.collection("analyzers").find(None, None));
@@ -166,8 +164,8 @@ fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender
 
         //create analyzer
         let analyzer = match class.as_ref() {
-            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(name, tx.clone()))) as Box<Analyzer>,
-            "StdDevAnalyzer" => Box::new(try!(StdDevAnalyzer::new(name, parameters, result_window.clone(), tx.clone()))) as Box<Analyzer>,
+            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(name, flag_tx.clone()))) as Box<Analyzer>,
+            "StdDevAnalyzer" => Box::new(try!(StdDevAnalyzer::new(name, parameters, result_window.clone(), flag_tx.clone()))) as Box<Analyzer>,
             _ => return Err(TipupError::from("unknown analyzer class")),
         };
 
