@@ -14,7 +14,7 @@ extern crate time;
 
 use bson::Bson;
 use clap::{App, ArgMatches};
-use mongodb::{Client, ClientOptions, ThreadedClient};
+use mongodb::{Client, ClientInner, ClientOptions, ThreadedClient};
 use mongodb::coll::options::{CursorType, FindOneAndUpdateOptions, FindOptions};
 use mongodb::db::{Database, ThreadedDatabase};
 use slog::{DrainExt, Logger};
@@ -60,14 +60,7 @@ fn main() {
     };
 
     //connect to mongodb
-    let connect_result = if ca_file.eq("") && certificate_file.eq("") && key_file.eq("") {
-        Client::connect(&mongodb_ip_address, mongodb_port)
-    } else {
-        let client_options = ClientOptions::with_ssl(&ca_file, &certificate_file, &key_file, true);
-        Client::connect_with_options(&mongodb_ip_address, mongodb_port, client_options)
-    };
-
-    let client = match connect_result {
+    let client = match initialize_mongodb_client(&mongodb_ip_address, mongodb_port, &ca_file, &certificate_file, &key_file) {
         Ok(client) => client,
         Err(e) => panic!("{}", e),
     };
@@ -91,8 +84,7 @@ fn main() {
 
     //create flag manager and start
     std::thread::spawn(move || {
-        let client_options = ClientOptions::with_ssl(&ca_file, &certificate_file, &key_file, true);
-        let client = match Client::connect_with_options(&mongodb_ip_address, mongodb_port, client_options)  {
+        let client = match initialize_mongodb_client(&mongodb_ip_address, mongodb_port, &ca_file, &certificate_file, &key_file) {
             Ok(client) => client,
             Err(e) => panic!("{}", e),
         };
@@ -131,6 +123,15 @@ fn main() {
         }
 
         std::thread::sleep(Duration::new(300, 0))
+    }
+}
+
+fn initialize_mongodb_client(mongodb_ip_address: &str, mongodb_port: u16, ca_file: &str, certificate_file: &str, key_file: &str) -> Result<Arc<ClientInner>, mongodb::Error> {
+    if ca_file.eq("") && certificate_file.eq("") && key_file.eq("") {
+        Client::connect(mongodb_ip_address, mongodb_port)
+    } else {
+        let client_options = ClientOptions::with_ssl(ca_file, certificate_file, key_file, true);
+        Client::connect_with_options(mongodb_ip_address, mongodb_port, client_options)
     }
 }
 
