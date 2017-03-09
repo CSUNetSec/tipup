@@ -2,12 +2,14 @@
 extern crate bson;
 #[macro_use]
 extern crate clap;
-extern crate env_logger;
-#[macro_use]
-extern crate log;
 extern crate mongodb;
 extern crate rustc_serialize;
 extern crate serde;
+#[macro_use]
+extern crate slog;
+#[macro_use]
+extern crate slog_scope;
+extern crate slog_term;
 extern crate time;
 
 use bson::Bson;
@@ -15,6 +17,7 @@ use clap::{App, ArgMatches};
 use mongodb::{Client, ClientOptions, ThreadedClient};
 use mongodb::coll::options::{CursorType, FindOneAndUpdateOptions, FindOptions};
 use mongodb::db::{Database, ThreadedDatabase};
+use slog::{DrainExt, Logger};
 
 mod analyzer;
 mod error;
@@ -45,7 +48,7 @@ fn parse_args(matches: &ArgMatches) -> Result<(String, u16, String, String, Stri
 }
 
 fn main() {
-    env_logger::init().unwrap();
+    slog_scope::set_global_logger(Logger::root(slog_term::streamer().build().fuse(), o![]));
 
     //parse arguments
     let yaml = load_yaml!("args.yaml");
@@ -107,6 +110,7 @@ fn main() {
     });
 
     //populate result window
+    info!("initializing result window");
     {
         let mut result_window = result_window.write().unwrap();
         if let Err(e) = result_window.initialize(&proddle_db) {
@@ -116,11 +120,9 @@ fn main() {
 
     //fetch results loop
     loop {
-        print!("{}: fetching new results - ", time::now_utc().to_timespec().sec);
         if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe, result_window.clone()) {
-            panic!("{}", e);
+            error!("{}", e);
         }
-        println!("complete");
 
         std::thread::sleep(Duration::new(300, 0))
     }
@@ -128,10 +130,13 @@ fn main() {
 
 fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender<Flag>, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
     //query mongodb for analyzer definitions
+    let mut count = 0;
     let cursor = try!(tipup_db.collection("analyzers").find(None, None));
     for document in cursor {
         //parse document
         let document = try!(document);
+        info!("loading analyzer: {:?}", document);
+
         let name = match document.get("name") {
             Some(&Bson::String(ref name)) => name,
             _ => return Err(TipupError::from("failed to parse analyzer name")),
@@ -161,13 +166,18 @@ fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, tx: Sender
 
         //add analyzer to pipe
         try!(pipe.add_analyzer(name.to_owned(), measurement.to_owned(), analyzer));
+        count += 1;
     }
 
+    if count > 0 {
+        info!("loaded {} analyzer(s)", count);
+    }
     Ok(())
 }
 
 fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
     //iterate over distinct hostnames for results
+    let mut count = 0;
     let hostname_cursor = try!(proddle_db.collection("results").distinct("hostname", None, None));
     for hostname_document in hostname_cursor {
         let hostname = match hostname_document {
@@ -233,6 +243,8 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
                 let mut result_window = result_window.write().unwrap();
                 try!(result_window.add_result(document))
             }
+
+            count += 1;
         }
 
         //update tipup db with most recenlty seen result timestamp
@@ -253,5 +265,8 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
         }
     }
 
+    if count > 0 {
+        info!("fetched {} new result(s)", count);
+    }
     Ok(())
 }
