@@ -189,10 +189,10 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
         };
 
         //iterate over newest results
-        let gte = doc! { "$gte" => timestamp };
+        let gt = doc! { "$gt" => timestamp };
         let proddle_search_document = Some(doc! {
             "hostname" => hostname,
-            "timestamp" => gte
+            "timestamp" => gt
         });
 
         //create find options
@@ -236,7 +236,7 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
         }
 
         //update tipup db with most recenlty seen result timestamp
-        if timestamp != max_timestamp {
+        if max_timestamp != -1 {
             let search_document = doc! { "hostname" => hostname };
             let update_timestamp_document = doc! { "timestamp" => max_timestamp };
             let update_document = doc! { "$set" => update_timestamp_document };
