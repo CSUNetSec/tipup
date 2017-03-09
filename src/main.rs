@@ -1,5 +1,6 @@
 #[macro_use(bson, doc)]
 extern crate bson;
+#[macro_use]
 extern crate chan;
 #[macro_use]
 extern crate clap;
@@ -34,8 +35,6 @@ use pipe::Pipe;
 use result_window::ResultWindow;
 
 use std::sync::{Arc, RwLock};
-//use std::sync::mpsc::Sender;
-use std::time::Duration;
 
 fn parse_args(matches: &ArgMatches) -> Result<(String, u16, String, String, String, String, String), TipupError> {
     let mongodb_ip_address = try!(value_t!(matches, "MONGODB_IP_ADDRESS", String));
@@ -115,12 +114,19 @@ fn main() {
     }
 
     //fetch results loop
+    let fetch_results_tick = chan::tick_ms(5 * 60 * 1000);
+    let analyze_event_tick = chan::tick_ms(10 * 60 * 1000);
     loop {
-        if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe, result_window.clone()) {
-            error!("{}", e);
-        }
+        chan_select! {
+            fetch_results_tick.recv() => {
+                if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe, result_window.clone()) {
+                    error!("{}", e);
+                }
+            },
+            analyze_event_tick.recv() => {
 
-        std::thread::sleep(Duration::new(300, 0))
+            },
+        }
     }
 }
 
