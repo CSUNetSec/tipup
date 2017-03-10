@@ -8,6 +8,8 @@ extern crate mongodb;
 extern crate rustc_serialize;
 extern crate serde;
 #[macro_use]
+extern crate serde_derive;
+#[macro_use]
 extern crate slog;
 #[macro_use]
 extern crate slog_scope;
@@ -24,12 +26,14 @@ use slog::{DrainExt, Logger};
 
 mod analyzer;
 mod error;
+mod event_manager;
 mod flag_manager;
 mod pipe;
 mod result_window;
 
 use analyzer::{Analyzer, ErrorAnalyzer, StdDevAnalyzer};
 use error::TipupError;
+use event_manager::EventManager;
 use flag_manager::{Flag, FlagManager};
 use pipe::Pipe;
 use result_window::ResultWindow;
@@ -75,15 +79,25 @@ fn main() {
         panic!("{}", e);
     }
 
-    //create new pipe
+    //create pipe and result_window
     let result_window = Arc::new(RwLock::new(ResultWindow::new()));
-    let (flag_tx, flag_rx) = chan::sync(0);
+    let (flag_tx, flag_rx) = chan::sync(50);
     let mut pipe = Pipe::new();
     if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, flag_tx, result_window.clone()) {
         panic!("{}", e);
     }
 
+    //populate result window
+    info!("initializing result window");
+    {
+        let mut result_window = result_window.write().unwrap();
+        if let Err(e) = result_window.initialize(&proddle_db) {
+           panic!("{}", e);
+        }
+    }
+
     //create flag manager and start
+    info!("initializing flag manager");
     std::thread::spawn(move || {
         let client = match initialize_mongodb_client(&mongodb_ip_address, mongodb_port, &ca_file, &certificate_file, &key_file) {
             Ok(client) => client,
@@ -97,25 +111,29 @@ fn main() {
 
         let mut flag_manager = FlagManager::new(&tipup_db);
         loop {
-            let flag = flag_rx.recv().unwrap();
-            if let Err(e) = flag_manager.process_flag(&flag) {
-                panic!("{}", e);
+            chan_select! {
+                flag_rx.recv() -> flag => {
+                    match flag {
+                        Some(flag) => {
+                            if let Err(e) = flag_manager.process_flag(&flag) {
+                                panic!("{}", e);
+                            }
+                        },
+                        None => continue,
+                    }
+                }
             }
         }
     });
 
-    //populate result window
-    info!("initializing result window");
-    {
-        let mut result_window = result_window.write().unwrap();
-        if let Err(e) = result_window.initialize(&proddle_db) {
-           panic!("{}", e);
-        }
-    }
+    //create event manager
+    info!("initializing event manager");
+    let event_manager = EventManager::new(604800); //7 days = 604800 seconds
 
-    //fetch results loop
-    let fetch_results_tick = chan::tick_ms(5 * 60 * 1000);
-    let analyze_event_tick = chan::tick_ms(10 * 60 * 1000);
+    //start command loop
+    info!("started");
+    let fetch_results_tick = chan::tick_ms(5 * 60 * 1000); //execute every 5 minutes
+    let analyze_event_tick = chan::tick_ms(10 * 60 * 1000); //execute every 10 minutes
     loop {
         chan_select! {
             fetch_results_tick.recv() => {
@@ -124,7 +142,9 @@ fn main() {
                 }
             },
             analyze_event_tick.recv() => {
-
+                if let Err(e) = event_manager.execute(&tipup_db) {
+                    error!("{}", e);
+                }
             },
         }
     }
@@ -197,7 +217,7 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
         };
 
         //query tipup db for timestamp of last seen result
-        let tipup_search_document = Some(doc! { "hostname" => hostname });
+        let tipup_search_document = Some(doc!("hostname" => hostname));
         let document = try!(tipup_db.collection("last_seen_result").find_one(tipup_search_document, None));
         let timestamp = match document {
             Some(document) => {
@@ -210,15 +230,15 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
         };
 
         //iterate over newest results
-        let gt = doc! { "$gt" => timestamp };
-        let proddle_search_document = Some(doc! {
+        let gt = doc!("$gt" => timestamp);
+        let proddle_search_document = Some(doc!(
             "hostname" => hostname,
             "timestamp" => gt
-        });
+        ));
 
         //create find options
         let negative_one = -1;
-        let sort_document = Some(doc! { "timestamp" => negative_one });
+        let sort_document = Some(doc!("timestamp" => negative_one));
         let find_options = Some(FindOptions {
             allow_partial_results: false,
             no_cursor_timeout: false,
@@ -260,9 +280,9 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
 
         //update tipup db with most recenlty seen result timestamp
         if max_timestamp != -1 {
-            let search_document = doc! { "hostname" => hostname };
-            let update_timestamp_document = doc! { "timestamp" => max_timestamp };
-            let update_document = doc! { "$set" => update_timestamp_document };
+            let search_document = doc!("hostname" => hostname);
+            let update_timestamp_document = doc!("timestamp" => max_timestamp);
+            let update_document = doc!("$set" => update_timestamp_document);
             let update_options = Some(FindOneAndUpdateOptions {
                 return_document: None,
                 max_time_ms: None,

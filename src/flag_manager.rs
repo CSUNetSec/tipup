@@ -1,19 +1,17 @@
-use bson;
-use bson::{Bson, Document};
+use bson::{self, Bson, Document};
 use bson::ordered::OrderedDocument;
 use mongodb::db::{Database, ThreadedDatabase};
-use serde::ser::{Serialize, Serializer, SerializeStruct};
 
 use error::TipupError;
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub enum FlagStatus {
     Unreachable,
     Warning,
     Internal,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct Flag {
     timestamp: i64,
     hostname: String,
@@ -23,25 +21,6 @@ pub struct Flag {
     url: String,
     status: FlagStatus,
     analyzer: String, //name of analyzer
-}
-
-impl Serialize for Flag {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S:Serializer {
-        let mut struc = serializer.serialize_struct("flag", 8)?;
-        struc.serialize_field("timestamp", &self.timestamp)?;
-        struc.serialize_field("hostname", &self.hostname)?;
-        struc.serialize_field("ip_address", &self.ip_address)?;
-        struc.serialize_field("domain", &self.domain)?;
-        struc.serialize_field("domain_ip", &self.domain_ip_address)?;
-        struc.serialize_field("url", &self.url)?;
-        match self.status {
-            FlagStatus::Unreachable => struc.serialize_field("status", "unreachable")?,
-            FlagStatus::Warning => struc.serialize_field("status", "warning")?,
-            FlagStatus::Internal => struc.serialize_field("status", "internal")?,
-        }
-        struc.serialize_field("analyzer", &self.analyzer)?;
-        struc.end()
-    }
 }
 
 impl Flag {
