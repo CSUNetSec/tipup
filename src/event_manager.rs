@@ -7,7 +7,8 @@ use time;
 use error::TipupError;
 use flag_manager::Flag;
 
-use std::collections::HashMap;
+use std;
+use std::collections::{HashMap, HashSet};
 
 pub struct EventManager {
     duration_seconds: i64,
@@ -26,31 +27,15 @@ impl EventManager {
 
     pub fn execute(&self, tipup_db: &Database) -> Result<(), TipupError> {
         //TODO retrieve active events
-        
+ 
         //get all flags from last 'duration seconds'
         let timestamp = time::now_utc().to_timespec().sec - self.duration_seconds;
         let timestamp_gte = doc!("$gte" => timestamp);
         let proddle_search_document = Some(doc!("timestamp" => timestamp_gte));
 
-        let find_options = Some(FindOptions {
-            allow_partial_results: false,
-            no_cursor_timeout: false,
-            oplog_replay: false,
-            skip: None,
-            limit: None,
-            cursor_type: CursorType::NonTailable,
-            batch_size: None,
-            comment: None,
-            max_time_ms: None,
-            modifiers: None,
-            projection: None,
-            sort: Some(doc!("timestamp" => 1)),
-            read_preference: None,
-        });
-
         //iterate over flag documents
         let mut flags: Vec<Flag> = Vec::new();
-        let cursor = try!(tipup_db.collection("flags").find(proddle_search_document, find_options));
+        let cursor = try!(tipup_db.collection("flags").find(proddle_search_document, None));
         for document in cursor {
             let document = try!(document);
 
@@ -61,7 +46,9 @@ impl EventManager {
             }
         }
 
-        //compute dbscan algorithm
+        debug!("found {} flag(s)", flags.len());
+
+        //execute dbscan algorithm
         let mut dbscan = DBSCAN::new(self.maximum_distance, self.minimum_points);
         let mut symmetric_matrix = SymmetricMatrix::<f64>::new(flags.len());
         for i in 0..flags.len()-1 {
@@ -70,6 +57,7 @@ impl EventManager {
             }
         }
 
+        debug!("performing clustering");
         let clusters = dbscan.perform_clustering(&symmetric_matrix);
 
         //create hashmap of clusters
@@ -83,10 +71,41 @@ impl EventManager {
             }
         }
 
-        //TODO compare current events with old events (change active flag if necessary)
-        //TODO update and/or write new events
+        debug!("found {} cluster(s)", cluster_map.len());
 
-        unimplemented!();
+        //TODO compare current events with old events (change active flag if necessary)
+ 
+        //TODO update and/or write new events
+        for flags in cluster_map.values() {
+            let mut minimum_timestamp = i64::max_value();
+            let mut maximum_timestamp = i64::min_value();
+            let mut domains = HashSet::new();
+            let mut urls = HashSet::new();
+
+            for flag in flags {
+                minimum_timestamp = std::cmp::min(minimum_timestamp, flag.timestamp);
+                maximum_timestamp = std::cmp::max(maximum_timestamp, flag.timestamp);
+                domains.insert(flag.domain.clone());
+                urls.insert(flag.url.clone());
+            }
+
+            //insert into mongodb
+            let flag_count = flags.len() as u32;
+            let domains: Vec<Bson> = domains.into_iter().map(|x| Bson::String(x)).collect();
+            let urls: Vec<Bson> = urls.into_iter().map(|x| Bson::String(x)).collect();
+            let event_document = doc!(
+                "active" => true,
+                "minimum_timestamp" => minimum_timestamp,
+                "maximum_timestamp" => maximum_timestamp,
+                "domains" => domains,
+                "urls" => urls,
+                "flag_count" => flag_count
+            );
+
+            try!(tipup_db.collection("events").insert_one(event_document, None));
+        }
+
+        Ok(())
     }
 }
 
