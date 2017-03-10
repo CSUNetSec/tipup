@@ -4,6 +4,7 @@ extern crate bson;
 extern crate chan;
 #[macro_use]
 extern crate clap;
+extern crate dbscan;
 extern crate mongodb;
 extern crate rustc_serialize;
 extern crate serde;

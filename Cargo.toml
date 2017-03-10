@@ -7,6 +7,7 @@ authors = ["Dan Rammer <hamersaw@bushpath.com>"]
 bson = "0.4"
 chan = "0.1"
 clap = {version = "2.19", features = ["yaml"]}
+dbscan = {path = "dbscan"}
 mongodb = { version = "0.2", features = ["ssl"]}
 rustc-serialize = "0.3"
 serde = "0.9"

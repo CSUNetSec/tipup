@@ -13,14 +13,14 @@ pub enum FlagStatus {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Flag {
-    timestamp: i64,
-    hostname: String,
-    ip_address: String,
-    domain: String,
-    domain_ip_address: Option<String>,
-    url: String,
-    status: FlagStatus,
-    analyzer: String, //name of analyzer
+    pub timestamp: i64,
+    pub hostname: String,
+    pub ip_address: String,
+    pub domain: String,
+    pub domain_ip_address: Option<String>,
+    pub url: String,
+    pub status: FlagStatus,
+    pub analyzer: String, //name of analyzer
 }
 
 impl Flag {
