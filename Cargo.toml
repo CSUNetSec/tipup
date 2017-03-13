@@ -1,6 +1,6 @@
 [package]
 name = "tipup"
-version = "0.2.2"
+version = "0.3.0"
 authors = ["Dan Rammer <hamersaw@bushpath.com>"]
 
 [dependencies]

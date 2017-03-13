@@ -14,7 +14,6 @@ use std::collections::{HashMap, HashSet};
 pub struct Event {
     #[serde(rename = "_id")]
     id: ObjectId,
-    active: bool,
     minimum_timestamp: i64,
     maximum_timestamp: i64,
     domain: String,
@@ -38,9 +37,12 @@ impl EventManager {
     }
 
     pub fn execute(&self, tipup_db: &Database) -> Result<(), TipupError> {
+        let timestamp = time::now_utc().to_timespec().sec - self.duration_seconds;
+
         //retrieve active events
         let mut active_events: HashMap<String, Vec<Event>> = HashMap::new();
-        let event_search_document = Some(doc!("active" => true));
+        let timestamp_gte = doc!("$gte" => timestamp);
+        let event_search_document = Some(doc!("maximum_timestamp" => timestamp_gte));
         let cursor = try!(tipup_db.collection("events").find(event_search_document, None));
         for document in cursor {
             let document = try!(document);
@@ -55,12 +57,11 @@ impl EventManager {
         }
  
         //get all flags from last 'duration seconds'
-        let timestamp = time::now_utc().to_timespec().sec - self.duration_seconds;
-        let timestamp_gte = doc!("$gte" => timestamp);
-        let flag_search_document = Some(doc!("timestamp" => timestamp_gte));
 
         //iterate over flag documents
         let mut flags: Vec<Flag> = Vec::new();
+        let timestamp_gte = doc!("$gte" => timestamp);
+        let flag_search_document = Some(doc!("timestamp" => timestamp_gte));
         let cursor = try!(tipup_db.collection("flags").find(flag_search_document, None));
         for document in cursor {
             let document = try!(document);
@@ -100,8 +101,6 @@ impl EventManager {
                 error!("{}", e);
             }
         }
-
-        //TODO update all active events that have max_timestamp >= execution_time
 
         Ok(())
     }
@@ -155,7 +154,6 @@ fn process_event(flags: &Vec<&Flag>, active_events: &mut HashMap<String, Vec<Eve
     //create event object and check if event already exists
     let event = Event {
         id: ObjectId::new().unwrap(),
-        active: true,
         minimum_timestamp: minimum_timestamp,
         maximum_timestamp: maximum_timestamp,
         domain: domains.into_iter().next().unwrap(),
@@ -176,18 +174,21 @@ fn process_event(flags: &Vec<&Flag>, active_events: &mut HashMap<String, Vec<Eve
                     active_event.urls.insert(url.clone());
                 }
 
+                let mut update = false;
                 for flag_id in event.flag_ids.iter() {
-                    active_event.flag_ids.insert(flag_id.clone());
+                    update = active_event.flag_ids.insert(flag_id.clone()) || update;
                 }
 
                 //update document in mongodb
-                let object_id = active_event.id.clone();
-                let search_document = doc!("_id" => object_id);
-                let event_document: Document = match bson::to_bson(active_event) {
-                    Ok(Bson::Document(event_document)) => event_document,
-                    _ => return Err(TipupError::from("failed to parse updated event document as Bson::Document")),
-                };
-                try!(tipup_db.collection("events").find_one_and_replace(search_document, event_document, None));
+                if update {
+                    let object_id = active_event.id.clone();
+                    let search_document = doc!("_id" => object_id);
+                    let event_document: Document = match bson::to_bson(active_event) {
+                        Ok(Bson::Document(event_document)) => event_document,
+                        _ => return Err(TipupError::from("failed to parse updated event document as Bson::Document")),
+                    };
+                    try!(tipup_db.collection("events").find_one_and_replace(search_document, event_document, None));
+                }
 
                 return Ok(());
             }
