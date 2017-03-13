@@ -1,4 +1,5 @@
 use bson::{self, Bson, Document};
+use bson::oid::ObjectId;
 use bson::ordered::OrderedDocument;
 use mongodb::db::{Database, ThreadedDatabase};
 
@@ -13,6 +14,8 @@ pub enum FlagStatus {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Flag {
+    #[serde(rename = "_id")]
+    pub id: ObjectId,
     pub timestamp: i64,
     pub hostname: String,
     pub ip_address: String,
@@ -20,7 +23,7 @@ pub struct Flag {
     pub domain_ip_address: Option<String>,
     pub url: String,
     pub status: FlagStatus,
-    pub analyzer: String, //name of analyzer
+    pub analyzer: String,
 }
 
 impl Flag {
@@ -42,6 +45,7 @@ impl Flag {
 
         Ok(
             Flag {
+                id: ObjectId::new().unwrap(),
                 timestamp: timestamp,
                 hostname: try!(parse_string(document, "hostname")),
                 ip_address: try!(parse_string(document, "ip_address")),

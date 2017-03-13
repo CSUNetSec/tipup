@@ -1,6 +1,6 @@
-use bson::{self, Bson};
+use bson::{self, Bson, Document};
+use bson::oid::ObjectId;
 use dbscan::{DBSCAN, SymmetricMatrix};
-use mongodb::coll::options::{CursorType, FindOptions};
 use mongodb::db::{Database, ThreadedDatabase};
 use time;
 
@@ -9,6 +9,18 @@ use flag_manager::Flag;
 
 use std;
 use std::collections::{HashMap, HashSet};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Event {
+    #[serde(rename = "_id")]
+    id: ObjectId,
+    active: bool,
+    minimum_timestamp: i64,
+    maximum_timestamp: i64,
+    domain: String,
+    urls: HashSet<String>,
+    flag_ids: HashSet<ObjectId>,
+}
 
 pub struct EventManager {
     duration_seconds: i64,
@@ -26,16 +38,30 @@ impl EventManager {
     }
 
     pub fn execute(&self, tipup_db: &Database) -> Result<(), TipupError> {
-        //TODO retrieve active events
+        //retrieve active events
+        let mut active_events: HashMap<String, Vec<Event>> = HashMap::new();
+        let event_search_document = Some(doc!("active" => true));
+        let cursor = try!(tipup_db.collection("events").find(event_search_document, None));
+        for document in cursor {
+            let document = try!(document);
+
+            //parse document into Flag
+            let event: Event = match bson::from_bson(Bson::Document(document)) {
+                Ok(event) => event,
+                Err(_) => return Err(TipupError::from("failed to parse bson document into event")),
+            };
+
+            active_events.entry(event.domain.clone()).or_insert(Vec::new()).push(event);
+        }
  
         //get all flags from last 'duration seconds'
         let timestamp = time::now_utc().to_timespec().sec - self.duration_seconds;
         let timestamp_gte = doc!("$gte" => timestamp);
-        let proddle_search_document = Some(doc!("timestamp" => timestamp_gte));
+        let flag_search_document = Some(doc!("timestamp" => timestamp_gte));
 
         //iterate over flag documents
         let mut flags: Vec<Flag> = Vec::new();
-        let cursor = try!(tipup_db.collection("flags").find(proddle_search_document, None));
+        let cursor = try!(tipup_db.collection("flags").find(flag_search_document, None));
         for document in cursor {
             let document = try!(document);
 
@@ -46,8 +72,6 @@ impl EventManager {
             }
         }
 
-        debug!("found {} flag(s)", flags.len());
-
         //execute dbscan algorithm
         let mut dbscan = DBSCAN::new(self.maximum_distance, self.minimum_points);
         let mut symmetric_matrix = SymmetricMatrix::<f64>::new(flags.len());
@@ -57,7 +81,6 @@ impl EventManager {
             }
         }
 
-        debug!("performing clustering");
         let clusters = dbscan.perform_clustering(&symmetric_matrix);
 
         //create hashmap of clusters
@@ -71,39 +94,14 @@ impl EventManager {
             }
         }
 
-        debug!("found {} cluster(s)", cluster_map.len());
-
-        //TODO compare current events with old events (change active flag if necessary)
- 
-        //TODO update and/or write new events
+        //process new events
         for flags in cluster_map.values() {
-            let mut minimum_timestamp = i64::max_value();
-            let mut maximum_timestamp = i64::min_value();
-            let mut domains = HashSet::new();
-            let mut urls = HashSet::new();
-
-            for flag in flags {
-                minimum_timestamp = std::cmp::min(minimum_timestamp, flag.timestamp);
-                maximum_timestamp = std::cmp::max(maximum_timestamp, flag.timestamp);
-                domains.insert(flag.domain.clone());
-                urls.insert(flag.url.clone());
+            if let Err(e) = process_event(&flags, &mut active_events, tipup_db) {
+                error!("{}", e);
             }
-
-            //insert into mongodb
-            let flag_count = flags.len() as u32;
-            let domains: Vec<Bson> = domains.into_iter().map(|x| Bson::String(x)).collect();
-            let urls: Vec<Bson> = urls.into_iter().map(|x| Bson::String(x)).collect();
-            let event_document = doc!(
-                "active" => true,
-                "minimum_timestamp" => minimum_timestamp,
-                "maximum_timestamp" => maximum_timestamp,
-                "domains" => domains,
-                "urls" => urls,
-                "flag_count" => flag_count
-            );
-
-            try!(tipup_db.collection("events").insert_one(event_document, None));
         }
+
+        //TODO update all active events that have max_timestamp >= execution_time
 
         Ok(())
     }
@@ -133,4 +131,75 @@ fn compute_flag_distance(flag_one: &Flag, flag_two: &Flag) -> f64 {
     };
 
     return (timestamp_score) + (status_score) + (domain_score * 1.3) + (url_score);
+}
+
+fn process_event(flags: &Vec<&Flag>, active_events: &mut HashMap<String, Vec<Event>>, tipup_db: &Database) -> Result<(), TipupError> {
+    let mut minimum_timestamp = i64::max_value();
+    let mut maximum_timestamp = i64::min_value();
+    let mut domains = HashSet::new();
+    let mut urls = HashSet::new();
+    let mut flag_ids = HashSet::new();
+
+    for flag in flags {
+        minimum_timestamp = std::cmp::min(minimum_timestamp, flag.timestamp);
+        maximum_timestamp = std::cmp::max(maximum_timestamp, flag.timestamp);
+        domains.insert(flag.domain.clone());
+        urls.insert(flag.url.clone());
+        flag_ids.insert(flag.id.clone());
+    }
+
+    if domains.len() != 1 {
+        return Err(TipupError::from(format!("cluster with {} domain(s) found", domains.len())));
+    }
+
+    //create event object and check if event already exists
+    let event = Event {
+        id: ObjectId::new().unwrap(),
+        active: true,
+        minimum_timestamp: minimum_timestamp,
+        maximum_timestamp: maximum_timestamp,
+        domain: domains.into_iter().next().unwrap(),
+        urls: urls,
+        flag_ids: flag_ids,
+    };
+
+    //compare current event with active events from same domain (based on timestamps)
+    if let Some(active_events) = active_events.get_mut(&event.domain) {
+        for active_event in active_events.iter_mut() {
+            if (event.minimum_timestamp >= active_event.minimum_timestamp && event.minimum_timestamp <= active_event.maximum_timestamp)
+                    || (event.maximum_timestamp <= active_event.maximum_timestamp && event.maximum_timestamp >= active_event.minimum_timestamp) {
+                //update active event in database
+                active_event.minimum_timestamp = std::cmp::min(event.minimum_timestamp, active_event.minimum_timestamp);
+                active_event.maximum_timestamp = std::cmp::min(event.maximum_timestamp, active_event.maximum_timestamp);
+
+                for url in event.urls.iter() {
+                    active_event.urls.insert(url.clone());
+                }
+
+                for flag_id in event.flag_ids.iter() {
+                    active_event.flag_ids.insert(flag_id.clone());
+                }
+
+                //update document in mongodb
+                let object_id = active_event.id.clone();
+                let search_document = doc!("_id" => object_id);
+                let event_document: Document = match bson::to_bson(active_event) {
+                    Ok(Bson::Document(event_document)) => event_document,
+                    _ => return Err(TipupError::from("failed to parse updated event document as Bson::Document")),
+                };
+                try!(tipup_db.collection("events").find_one_and_replace(search_document, event_document, None));
+
+                return Ok(());
+            }
+        }
+    }
+
+    //write to database
+    let event_document: Document = match bson::to_bson(&event) {
+        Ok(Bson::Document(event_document)) => event_document,
+        _ => return Err(TipupError::from("failed to parse event document as Bson::Document")),
+    };
+
+    try!(tipup_db.collection("events").insert_one(event_document, None));
+    Ok(())
 }
