@@ -41,7 +41,7 @@ use result_window::ResultWindow;
 
 use std::sync::{Arc, RwLock};
 
-fn parse_args(matches: &ArgMatches) -> Result<(String, u16, String, String, String, String, String), TipupError> {
+fn parse_args(matches: &ArgMatches) -> Result<(String, u16, String, String, String, String, String, u32, u32), TipupError> {
     let mongodb_ip_address = try!(value_t!(matches, "MONGODB_IP_ADDRESS", String));
     let mongodb_port = try!(value_t!(matches.value_of("MONGODB_PORT"), u16));
     let ca_file = try!(value_t!(matches.value_of("CA_FILE"), String));
@@ -49,8 +49,10 @@ fn parse_args(matches: &ArgMatches) -> Result<(String, u16, String, String, Stri
     let key_file = try!(value_t!(matches.value_of("KEY_FILE"), String));
     let username = try!(value_t!(matches.value_of("USERNAME"), String));
     let password = try!(value_t!(matches.value_of("PASSWORD"), String));
+    let update_flags_interval = try!(value_t!(matches.value_of("UPDATE_FLAGS_INTERVAL"), u32));
+    let update_events_interval = try!(value_t!(matches.value_of("UPDATE_EVENTS_INTERVAL"), u32));
 
-    Ok((mongodb_ip_address, mongodb_port, ca_file, certificate_file, key_file, username, password))
+    Ok((mongodb_ip_address, mongodb_port, ca_file, certificate_file, key_file, username, password, update_flags_interval, update_events_interval))
 }
 
 fn main() {
@@ -60,7 +62,7 @@ fn main() {
     let yaml = load_yaml!("args.yaml");
     let matches = App::from_yaml(yaml).get_matches();
 
-    let (mongodb_ip_address, mongodb_port, ca_file, certificate_file, key_file, username, password) = match parse_args(&matches) {
+    let (mongodb_ip_address, mongodb_port, ca_file, certificate_file, key_file, username, password, update_flags_interval, update_events_interval) = match parse_args(&matches) {
         Ok(args) => args,
         Err(e) => panic!("{}", e),
     };
@@ -133,16 +135,16 @@ fn main() {
 
     //start command loop
     info!("started");
-    let fetch_results_tick = chan::tick_ms(5 * 60 * 1000); //execute every 5 minutes
-    let analyze_event_tick = chan::tick_ms(10 * 60 * 1000); //execute every 10 minutes
+    let update_flags_tick = chan::tick_ms(update_flags_interval * 1000);
+    let update_events_tick = chan::tick_ms(update_events_interval * 1000);
     loop {
         chan_select! {
-            fetch_results_tick.recv() => {
+            update_flags_tick.recv() => {
                 if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe, result_window.clone()) {
                     error!("{}", e);
                 }
             },
-            analyze_event_tick.recv() => {
+            update_events_tick.recv() => {
                 if let Err(e) = event_manager.execute(&tipup_db) {
                     error!("{}", e);
                 }

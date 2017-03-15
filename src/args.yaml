@@ -1,5 +1,5 @@
 name: tipup
-version: "0.3.1"
+version: "0.3.2"
 author: Daniel Rammer <hamersaw@bushpath.com>
 about: Proddle analysis application
 args:
@@ -43,3 +43,15 @@ args:
         long: password
         takes_value: true
         help: Password for mongodb connection.
+    - UPDATE_FLAGS_INTERVAL:
+        short: F
+        long: update_flags_interval
+        takes_value: true
+        default_value: "300"
+        help: Number of seconds to periodically update flags.
+    - UPDATE_EVENTS_INTERVAL:
+        short: E
+        long: update_events_interval
+        takes_value: true
+        default_value: "600"
+        help: Number of seconds to periodically update events.
