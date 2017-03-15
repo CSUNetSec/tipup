@@ -134,8 +134,7 @@ fn main() {
     //start command loop
     info!("started");
     let fetch_results_tick = chan::tick_ms(5 * 60 * 1000); //execute every 5 minutes
-    //let analyze_event_tick = chan::tick_ms(10 * 60 * 1000); //execute every 10 minutes
-    let analyze_event_tick = chan::tick_ms(1000); //execute every 10 minutes
+    let analyze_event_tick = chan::tick_ms(10 * 60 * 1000); //execute every 10 minutes
     loop {
         chan_select! {
             fetch_results_tick.recv() => {

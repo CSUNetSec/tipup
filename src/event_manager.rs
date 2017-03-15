@@ -56,8 +56,6 @@ impl EventManager {
             active_events.entry(event.domain.clone()).or_insert(Vec::new()).push(event);
         }
  
-        //get all flags from last 'duration seconds'
-
         //iterate over flag documents
         let mut flags: Vec<Flag> = Vec::new();
         let timestamp_gte = doc!("$gte" => timestamp);
@@ -71,6 +69,10 @@ impl EventManager {
                 Ok(flag) => flags.push(flag),
                 Err(_) => return Err(TipupError::from("failed to parse bson document into flag")),
             }
+        }
+
+        if flags.len() == 0 {
+            return Ok(());
         }
 
         //execute dbscan algorithm

@@ -16,6 +16,7 @@ pub enum FlagStatus {
 pub struct Flag {
     #[serde(rename = "_id")]
     pub id: ObjectId,
+    pub measurement_id: ObjectId,
     pub timestamp: i64,
     pub hostname: String,
     pub ip_address: String,
@@ -28,6 +29,11 @@ pub struct Flag {
 
 impl Flag {
     pub fn new(document: &OrderedDocument, status: FlagStatus, analyzer: &str) -> Result<Flag, TipupError> {
+        let measurement_id = match document.get("_id") {
+            Some(&Bson::ObjectId(ref measurement_id)) => measurement_id.clone(),
+            _ => return Err(TipupError::from("failed to parse measurement _id as ObjectId")),
+        };
+
         let timestamp = match document.get("timestamp") {
             Some(&Bson::I64(timestamp)) => timestamp,
             _ => return Err(TipupError::from("failed to parse timestamp as i64")),
@@ -46,6 +52,7 @@ impl Flag {
         Ok(
             Flag {
                 id: ObjectId::new().unwrap(),
+                measurement_id: measurement_id,
                 timestamp: timestamp,
                 hostname: try!(parse_string(document, "hostname")),
                 ip_address: try!(parse_string(document, "ip_address")),
