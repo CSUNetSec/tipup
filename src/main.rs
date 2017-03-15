@@ -73,26 +73,26 @@ fn main() {
         Err(e) => panic!("{}", e),
     };
     
-    let (tipup_db, proddle_db) = (client.db("tipup"), client.db("proddle"));
-    if let Err(e) = tipup_db.auth(&username, &password) {
-        panic!("{}", e);
-    }
-
-    if let Err(e) = proddle_db.auth(&username, &password) {
-        panic!("{}", e);
-    }
-
     //create pipe and result_window
     let result_window = Arc::new(RwLock::new(ResultWindow::new()));
     let (flag_tx, flag_rx) = chan::sync(50);
     let mut pipe = Pipe::new();
-    if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, flag_tx, result_window.clone()) {
-        panic!("{}", e);
-    }
-
-    //populate result window
-    info!("initializing result window");
     {
+        let tipup_db = match initialize_db(&client, "tipup", &username, &password) {
+            Ok(tipup_db) => tipup_db,
+            Err(e) => panic!("{}", e),
+        };
+
+        let proddle_db = match initialize_db(&client, "proddle", &username, &password) {
+            Ok(proddle_db) => proddle_db,
+            Err(e) => panic!("{}", e),
+        };
+
+        if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, flag_tx, result_window.clone()) {
+            panic!("{}", e);
+        }
+
+        info!("initializing result window");
         let mut result_window = result_window.write().unwrap();
         if let Err(e) = result_window.initialize(&proddle_db) {
            panic!("{}", e);
@@ -101,30 +101,44 @@ fn main() {
 
     //create flag manager and start
     info!("initializing flag manager");
+    let (thread_username, thread_password) = (username.clone(), password.clone());
     std::thread::spawn(move || {
+        let mut flag_buffer = Vec::new();
+        let mut flag_manager = FlagManager::new();
+        let process_flag_tick = chan::tick_ms(5 * 1000);
+
         let client = match initialize_mongodb_client(&mongodb_ip_address, mongodb_port, &ca_file, &certificate_file, &key_file) {
             Ok(client) => client,
             Err(e) => panic!("{}", e),
         };
 
-        let tipup_db = client.db("tipup");
-        if let Err(e) = tipup_db.auth(&username, &password) {
-            panic!("{}", e);
-        }
-
-        let mut flag_manager = FlagManager::new(&tipup_db);
         loop {
             chan_select! {
                 flag_rx.recv() -> flag => {
-                    match flag {
-                        Some(flag) => {
-                            if let Err(e) = flag_manager.process_flag(&flag) {
-                                panic!("{}", e);
-                            }
-                        },
-                        None => continue,
+                    if let Some(flag) = flag {
+                        flag_buffer.push(flag);
                     }
-                }
+                },
+                process_flag_tick.recv() => {
+                    if flag_buffer.len() > 0 {
+                        let tipup_db = match initialize_db(&client, "tipup", &thread_username, &thread_password) {
+                            Ok(tipup_db) => tipup_db,
+                            Err(e) => {
+                                error!("{}", e);
+                                continue;
+                            },
+                        };
+
+                        for flag in flag_buffer.iter() {
+                            if let Err(e) = flag_manager.process_flag(flag, &tipup_db) {
+                                error!("{}", e);
+                            }
+                        }
+                        
+                        info!("wrote {} new flag(s)", flag_buffer.len());
+                        flag_buffer.clear();
+                    }
+                },
             }
         }
     });
@@ -134,17 +148,41 @@ fn main() {
     let event_manager = EventManager::new(604800); //7 days = 604800 seconds
 
     //start command loop
-    info!("started");
+    info!("TIPUP STARTED");
     let update_flags_tick = chan::tick_ms(update_flags_interval * 1000);
     let update_events_tick = chan::tick_ms(update_events_interval * 1000);
     loop {
         chan_select! {
             update_flags_tick.recv() => {
+                let tipup_db = match initialize_db(&client, "tipup", &username, &password) {
+                    Ok(tipup_db) => tipup_db,
+                    Err(e) => {
+                        error!("{}", e);
+                        continue;
+                    },
+                };
+
+                let proddle_db = match initialize_db(&client, "proddle", &username, &password) {
+                    Ok(proddle_db) => proddle_db,
+                    Err(e) => {
+                        error!("{}", e);
+                        continue;
+                    },
+                };
+
                 if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe, result_window.clone()) {
                     error!("{}", e);
                 }
             },
             update_events_tick.recv() => {
+                let tipup_db = match initialize_db(&client, "tipup", &username, &password) {
+                    Ok(tipup_db) => tipup_db,
+                    Err(e) => {
+                        error!("{}", e);
+                        continue;
+                    },
+                };
+
                 if let Err(e) = event_manager.execute(&tipup_db) {
                     error!("{}", e);
                 }
@@ -160,6 +198,12 @@ fn initialize_mongodb_client(mongodb_ip_address: &str, mongodb_port: u16, ca_fil
         let client_options = ClientOptions::with_ssl(ca_file, certificate_file, key_file, true);
         Client::connect_with_options(mongodb_ip_address, mongodb_port, client_options)
     }
+}
+
+fn initialize_db(client: &Client, db_name: &str, username: &str, password: &str) -> Result<Database, TipupError> {
+    let db = client.db(db_name);
+    try!(db.auth(&username, &password));
+    Ok(db)
 }
 
 fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, flag_tx: Sender<Flag>, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {

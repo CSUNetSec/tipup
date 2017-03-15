@@ -73,25 +73,23 @@ fn parse_string(document: &OrderedDocument, name: &str) -> Result<String, TipupE
     }
 }
 
-pub struct FlagManager<'a> {
-    tipup_db: &'a Database,
+pub struct FlagManager {
 }
 
-impl<'a> FlagManager<'a> {
-    pub fn new(tipup_db: &'a Database) -> FlagManager {
+impl FlagManager {
+    pub fn new() -> FlagManager {
         FlagManager {
-            tipup_db: tipup_db,
         }
     }
 
-    pub fn process_flag(&mut self, flag: &Flag) -> Result<(), TipupError> {
+    pub fn process_flag(&mut self, flag: &Flag, tipup_db: &Database) -> Result<(), TipupError> {
         //write to database
         let document: Document = match bson::to_bson(flag) {
             Ok(Bson::Document(document)) => document,
             _ => return Err(TipupError::from("failed to parse flag json as Bson::Document")),
         };
 
-        try!(self.tipup_db.collection("flags").insert_one(document, None));
+        try!(tipup_db.collection("flags").insert_one(document, None));
 
         Ok(())
     }
