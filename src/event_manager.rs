@@ -37,7 +37,7 @@ impl EventManager {
     }
 
     pub fn execute(&self, tipup_db: &Database) -> Result<(), TipupError> {
-        let timestamp = time::now_utc().to_timespec().sec - self.duration_seconds;
+        /*let timestamp = time::now_utc().to_timespec().sec - self.duration_seconds;
 
         //retrieve active events
         let mut active_events: HashMap<String, Vec<Event>> = HashMap::new();
@@ -102,13 +102,13 @@ impl EventManager {
             if let Err(e) = process_event(&flags, &mut active_events, tipup_db) {
                 error!("{}", e);
             }
-        }
+        }*/
 
         Ok(())
     }
 }
 
-fn compute_flag_distance(flag_one: &Flag, flag_two: &Flag) -> f64 {
+/*fn compute_flag_distance(flag_one: &Flag, flag_two: &Flag) -> f64 {
     //timestamp
     let timestamp_difference = (flag_one.timestamp - flag_two.timestamp).abs();
     let timestamp_score = match timestamp_difference {
@@ -205,4 +205,4 @@ fn process_event(flags: &Vec<&Flag>, active_events: &mut HashMap<String, Vec<Eve
 
     try!(tipup_db.collection("events").insert_one(event_document, None));
     Ok(())
-}
+}*/

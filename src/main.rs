@@ -175,7 +175,7 @@ fn main() {
                 }
             },
             update_events_tick.recv() => {
-                let tipup_db = match initialize_db(&client, "tipup", &username, &password) {
+                /*let tipup_db = match initialize_db(&client, "tipup", &username, &password) {
                     Ok(tipup_db) => tipup_db,
                     Err(e) => {
                         error!("{}", e);
@@ -185,7 +185,7 @@ fn main() {
 
                 if let Err(e) = event_manager.execute(&tipup_db) {
                     error!("{}", e);
-                }
+                }*/
             },
         }
     }
