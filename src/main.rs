@@ -78,23 +78,18 @@ fn main() {
     let (flag_tx, flag_rx) = chan::sync(50);
     let mut pipe = Pipe::new();
     {
-        let tipup_db = match initialize_db(&client, "tipup", &username, &password) {
-            Ok(tipup_db) => tipup_db,
+        let db = match initialize_db(&client, "proddle", &username, &password) {
+            Ok(db) => db,
             Err(e) => panic!("{}", e),
         };
 
-        let proddle_db = match initialize_db(&client, "proddle", &username, &password) {
-            Ok(proddle_db) => proddle_db,
-            Err(e) => panic!("{}", e),
-        };
-
-        if let Err(e) = load_analyzers(&proddle_db, &tipup_db, &mut pipe, flag_tx, result_window.clone()) {
+        if let Err(e) = load_analyzers(&db, &mut pipe, flag_tx, result_window.clone()) {
             panic!("{}", e);
         }
 
         info!("initializing result window");
         let mut result_window = result_window.write().unwrap();
-        if let Err(e) = result_window.initialize(&proddle_db) {
+        if let Err(e) = result_window.initialize(&db) {
            panic!("{}", e);
         }
     }
@@ -121,8 +116,8 @@ fn main() {
                 },
                 process_flag_tick.recv() => {
                     if flag_buffer.len() > 0 {
-                        let tipup_db = match initialize_db(&client, "tipup", &thread_username, &thread_password) {
-                            Ok(tipup_db) => tipup_db,
+                        let db = match initialize_db(&client, "proddle", &thread_username, &thread_password) {
+                            Ok(db) => db,
                             Err(e) => {
                                 error!("{}", e);
                                 continue;
@@ -130,7 +125,7 @@ fn main() {
                         };
 
                         for flag in flag_buffer.iter() {
-                            if let Err(e) = flag_manager.process_flag(flag, &tipup_db) {
+                            if let Err(e) = flag_manager.process_flag(flag, &db) {
                                 error!("{}", e);
                             }
                         }
@@ -154,23 +149,15 @@ fn main() {
     loop {
         chan_select! {
             update_flags_tick.recv() => {
-                let tipup_db = match initialize_db(&client, "tipup", &username, &password) {
-                    Ok(tipup_db) => tipup_db,
+                let db = match initialize_db(&client, "proddle", &username, &password) {
+                    Ok(db) => db,
                     Err(e) => {
                         error!("{}", e);
                         continue;
                     },
                 };
 
-                let proddle_db = match initialize_db(&client, "proddle", &username, &password) {
-                    Ok(proddle_db) => proddle_db,
-                    Err(e) => {
-                        error!("{}", e);
-                        continue;
-                    },
-                };
-
-                if let Err(e) = fetch_results(&proddle_db, &tipup_db, &pipe, result_window.clone()) {
+                if let Err(e) = fetch_results(&db, &pipe, result_window.clone()) {
                     error!("{}", e);
                 }
             },
@@ -206,10 +193,10 @@ fn initialize_db(client: &Client, db_name: &str, username: &str, password: &str)
     Ok(db)
 }
 
-fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, flag_tx: Sender<Flag>, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
+fn load_analyzers(db: &Database, pipe: &mut Pipe, flag_tx: Sender<Flag>, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
     //query mongodb for analyzer definitions
     let mut count = 0;
-    let cursor = try!(tipup_db.collection("analyzers").find(None, None));
+    let cursor = try!(db.collection("analyzers").find(None, None));
     for document in cursor {
         //parse document
         let document = try!(document);
@@ -250,27 +237,28 @@ fn load_analyzers(_: &Database, tipup_db: &Database, pipe: &mut Pipe, flag_tx: S
     if count > 0 {
         info!("loaded {} analyzer(s)", count);
     }
+
     Ok(())
 }
 
-fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
+fn fetch_results(db: &Database, pipe: &Pipe, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
     //iterate over distinct hostnames for results
     let mut count = 0;
-    let hostname_cursor = try!(proddle_db.collection("results").distinct("hostname", None, None));
+    let hostname_cursor = try!(db.collection("measurements").distinct("vantage_hostname", None, None));
     for hostname_document in hostname_cursor {
         let hostname = match hostname_document {
             Bson::String(ref hostname) => hostname,
             _ => continue,
         };
 
-        //query tipup db for timestamp of last seen result
-        let tipup_search_document = Some(doc!("hostname" => hostname));
-        let document = try!(tipup_db.collection("last_seen_result").find_one(tipup_search_document, None));
+        //query db for timestamp of last seen result
+        let search_document = Some(doc!("vantage_hostname" => hostname));
+        let document = try!(db.collection("last_analyzed_measurement").find_one(search_document, None));
         let timestamp = match document {
             Some(document) => {
                 match document.get("timestamp") {
                     Some(&Bson::I64(timestamp)) => timestamp,
-                    _ => return Err(TipupError::from(format!("failed to parse 'timestamp' value in tipup.last_seen_result for host '{}'", hostname))),
+                    _ => return Err(TipupError::from(format!("failed to parse 'timestamp' value in last_analyzed_result for host '{}'", hostname))),
                 }
             },
             None => 0,
@@ -278,7 +266,7 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
 
         //iterate over newest results
         let gt = doc!("$gt" => timestamp);
-        let proddle_search_document = Some(doc!(
+        let search_document = Some(doc!(
             "hostname" => hostname,
             "timestamp" => gt
         ));
@@ -303,7 +291,7 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
         });
 
         //iterate over new results
-        let cursor = try!(proddle_db.collection("results").find(proddle_search_document, find_options));
+        let cursor = try!(db.collection("measurements").find(search_document, find_options));
         let mut max_timestamp = -1;
         for document in cursor {
             let document = try!(document);
@@ -325,9 +313,9 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
             count += 1;
         }
 
-        //update tipup db with most recenlty seen result timestamp
+        //update db with most recenlty analyzed result timestamp
         if max_timestamp != -1 {
-            let search_document = doc!("hostname" => hostname);
+            let search_document = doc!("vantage_hostname" => hostname);
             let update_timestamp_document = doc!("timestamp" => max_timestamp);
             let update_document = doc!("$set" => update_timestamp_document);
             let update_options = Some(FindOneAndUpdateOptions {
@@ -339,12 +327,13 @@ fn fetch_results(proddle_db: &Database, tipup_db: &Database, pipe: &Pipe, result
                 write_concern: None,
             });
 
-            try!(tipup_db.collection("last_seen_result").find_one_and_update(search_document, update_document, update_options));
+            try!(db.collection("last_analyzed_result").find_one_and_update(search_document, update_document, update_options));
         }
     }
 
     if count > 0 {
-        info!("fetched {} new result(s)", count);
+        info!("fetched {} new measurements(s)", count);
     }
+
     Ok(())
 }

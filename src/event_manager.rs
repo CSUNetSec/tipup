@@ -36,7 +36,7 @@ impl EventManager {
         }
     }
 
-    pub fn execute(&self, tipup_db: &Database) -> Result<(), TipupError> {
+    pub fn execute(&self, db: &Database) -> Result<(), TipupError> {
         /*let timestamp = time::now_utc().to_timespec().sec - self.duration_seconds;
 
         //retrieve active events
