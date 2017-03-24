@@ -162,15 +162,15 @@ fn main() {
                 }
             },
             update_events_tick.recv() => {
-                /*let tipup_db = match initialize_db(&client, "tipup", &username, &password) {
-                    Ok(tipup_db) => tipup_db,
+                /*let db = match initialize_db(&client, "proddle", &username, &password) {
+                    Ok(db) => db,
                     Err(e) => {
                         error!("{}", e);
                         continue;
                     },
                 };
 
-                if let Err(e) = event_manager.execute(&tipup_db) {
+                if let Err(e) = event_manager.execute(&db) {
                     error!("{}", e);
                 }*/
             },
@@ -212,25 +212,35 @@ fn load_analyzers(db: &Database, pipe: &mut Pipe, flag_tx: Sender<Flag>, result_
             _ => return Err(TipupError::from("failed to parse analyzer class")),
         };
 
-        let measurement = match document.get("measurement") {
-            Some(&Bson::String(ref measurement)) => measurement,
-            _ => return Err(TipupError::from("failed to parse analyzer measurement")),
+        let status = match document.get("status") {
+            Some(&Bson::String(ref status)) => status,
+            _ => return Err(TipupError::from("failed to parse analyzer status")),
+        };
+
+        let measurement_class = match document.get("measurement_class") {
+            Some(&Bson::String(ref measurement_class)) => measurement_class,
+            _ => return Err(TipupError::from("failed to parse analyzer measurement_class")),
+        };
+
+        let fields: Vec<String> = match document.get("fields") {
+            Some(&Bson::Array(ref fields)) => fields.iter().map(|x| x.to_string().replace("\"", "")).collect(),
+            _ => return Err(TipupError::from("failed to parse analyzer fields")),
         };
 
         let parameters = match document.get("parameters") {
-            Some(&Bson::Document(ref parameters)) => parameters,
+            Some(&Bson::Array(ref parameters)) => parameters,
             _ => return Err(TipupError::from("failed to parse analyzer parameters")),
         };
 
         //create analyzer
         let analyzer = match class.as_ref() {
-            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(name, flag_tx.clone()))) as Box<Analyzer>,
-            "StdDevAnalyzer" => Box::new(try!(StdDevAnalyzer::new(name, parameters, result_window.clone(), flag_tx.clone()))) as Box<Analyzer>,
+            "ErrorAnalyzer" => Box::new(try!(ErrorAnalyzer::new(name, status, fields, flag_tx.clone()))) as Box<Analyzer>,
+            //"StdDevAnalyzer" => Box::new(try!(StdDevAnalyzer::new(name, parameters, result_window.clone(), flag_tx.clone()))) as Box<Analyzer>,
             _ => return Err(TipupError::from("unknown analyzer class")),
         };
 
         //add analyzer to pipe
-        try!(pipe.add_analyzer(name.to_owned(), measurement.to_owned(), analyzer));
+        try!(pipe.add_analyzer(name.to_owned(), measurement_class.to_owned(), analyzer));
         count += 1;
     }
 
@@ -242,7 +252,7 @@ fn load_analyzers(db: &Database, pipe: &mut Pipe, flag_tx: Sender<Flag>, result_
 }
 
 fn fetch_results(db: &Database, pipe: &Pipe, result_window: Arc<RwLock<ResultWindow>>) -> Result<(), TipupError> {
-    //iterate over distinct hostnames for results
+    //iterate over distinct hostnames for measurements
     let mut count = 0;
     let hostname_cursor = try!(db.collection("measurements").distinct("vantage_hostname", None, None));
     for hostname_document in hostname_cursor {
@@ -253,21 +263,21 @@ fn fetch_results(db: &Database, pipe: &Pipe, result_window: Arc<RwLock<ResultWin
 
         //query db for timestamp of last seen result
         let search_document = Some(doc!("vantage_hostname" => hostname));
-        let document = try!(db.collection("last_analyzed_measurement").find_one(search_document, None));
+        let document = try!(db.collection("analyzed_measurements").find_one(search_document, None));
         let timestamp = match document {
             Some(document) => {
                 match document.get("timestamp") {
                     Some(&Bson::I64(timestamp)) => timestamp,
-                    _ => return Err(TipupError::from(format!("failed to parse 'timestamp' value in last_analyzed_result for host '{}'", hostname))),
+                    _ => return Err(TipupError::from(format!("failed to parse 'timestamp' value in analyzed_measurements for host '{}'", hostname))),
                 }
             },
             None => 0,
         };
 
-        //iterate over newest results
+        //iterate over newest measurements
         let gt = doc!("$gt" => timestamp);
         let search_document = Some(doc!(
-            "hostname" => hostname,
+            "vantage_hostname" => hostname,
             "timestamp" => gt
         ));
 
@@ -290,12 +300,12 @@ fn fetch_results(db: &Database, pipe: &Pipe, result_window: Arc<RwLock<ResultWin
             read_preference: None,
         });
 
-        //iterate over new results
+        //iterate over new measurements
         let cursor = try!(db.collection("measurements").find(search_document, find_options));
         let mut max_timestamp = -1;
         for document in cursor {
             let document = try!(document);
-            if let Err(e) = pipe.send_result(&document) {
+            if let Err(e) = pipe.send_measurement(&document) {
                 panic!("document:{:?} err:{}", document, e);
             }
 
@@ -327,7 +337,7 @@ fn fetch_results(db: &Database, pipe: &Pipe, result_window: Arc<RwLock<ResultWin
                 write_concern: None,
             });
 
-            try!(db.collection("last_analyzed_result").find_one_and_update(search_document, update_document, update_options));
+            try!(db.collection("analyzed_measurements").find_one_and_update(search_document, update_document, update_options));
         }
     }
 

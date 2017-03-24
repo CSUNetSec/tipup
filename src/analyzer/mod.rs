@@ -9,5 +9,5 @@ pub use analyzer::std_dev_analyzer::StdDevAnalyzer;
 use error::TipupError;
 
 pub trait Analyzer {
-    fn process_result(&mut self, document: &OrderedDocument) -> Result<(), TipupError>;
+    fn process_measurement(&mut self, document: &OrderedDocument) -> Result<(), TipupError>;
 }

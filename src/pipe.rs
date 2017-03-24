@@ -18,9 +18,9 @@ impl Pipe {
         }
     }
 
-    pub fn add_analyzer(&mut self, name: String, measurement: String, analyzer: Box<Analyzer>) -> Result<(), TipupError> {
+    pub fn add_analyzer(&mut self, name: String, measurement_class: String, analyzer: Box<Analyzer>) -> Result<(), TipupError> {
         let mut analyzers = self.analyzers.lock().unwrap();
-        let mut analyzers = analyzers.entry(measurement).or_insert(HashMap::new());
+        let mut analyzers = analyzers.entry(measurement_class).or_insert(HashMap::new());
         if analyzers.contains_key(&name) {
             return Err(TipupError::from("analyzer name already exists"));
         }
@@ -29,18 +29,18 @@ impl Pipe {
         Ok(())
     }
 
-    pub fn send_result(&self, document: &OrderedDocument) -> Result<(), TipupError> {
+    pub fn send_measurement(&self, document: &OrderedDocument) -> Result<(), TipupError> {
         //get measurement name
-        let measurement = match document.get("measurement") {
-            Some(&Bson::String(ref measurement)) => measurement,
-            _ => return Err(TipupError::from("failed to parse result measurement")),
+        let measurement_class = match document.get("measurement_class") {
+            Some(&Bson::String(ref measurement_class)) => measurement_class,
+            _ => return Err(TipupError::from("failed to parse result measurement_class")),
         };
 
         //send to analyzers registered to that measurement
         let mut analyzers = self.analyzers.lock().unwrap();
-        if analyzers.contains_key(measurement) {
-            for analyzer in analyzers.get_mut(measurement).unwrap().values_mut() {
-                try!(analyzer.process_result(document));
+        if analyzers.contains_key(measurement_class) {
+            for analyzer in analyzers.get_mut(measurement_class).unwrap().values_mut() {
+                try!(analyzer.process_measurement(document));
             }
         }
 

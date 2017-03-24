@@ -4,5 +4,6 @@
 Proddle analysis engine.
 
 ##TODO
-- get event_manager up and running again
+- fix event_manager
+- fix result_window (change name to measurement_window)
 - get resource profile

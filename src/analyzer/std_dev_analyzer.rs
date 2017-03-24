@@ -4,20 +4,21 @@ use chan::Sender;
 
 use analyzer::Analyzer;
 use error::TipupError;
-use flag_manager::{Flag, FlagStatus};
+use flag_manager::Flag;
 use result_window::{ResultWindow, VariableWindow};
 
 use std::sync::{Arc, RwLock};
 
 pub struct StdDevAnalyzer {
     name: String,
+    status: String,
     variable_name: Vec<String>,
     variable_window: Arc<RwLock<VariableWindow>>,
     flag_tx: Sender<Flag>,
 }
 
 impl StdDevAnalyzer {
-    pub fn new(name: &str, parameters: &OrderedDocument, result_window: Arc<RwLock<ResultWindow>>, flag_tx: Sender<Flag>, ) -> Result<StdDevAnalyzer, TipupError> {
+    pub fn new(name: &str, status: &str, parameters: &OrderedDocument, result_window: Arc<RwLock<ResultWindow>>, flag_tx: Sender<Flag>, ) -> Result<StdDevAnalyzer, TipupError> {
         //parse parameters to retrieve variable name
         let variable_name = match parameters.get("variable_name") {
             Some(&Bson::Array(ref param_variable_name)) => {
@@ -43,6 +44,7 @@ impl StdDevAnalyzer {
         Ok(
             StdDevAnalyzer {
                 name: name.to_owned(),
+                status: status.to_owned(),
                 variable_name: variable_name,
                 variable_window: variable_window,
                 flag_tx: flag_tx,
@@ -52,7 +54,7 @@ impl StdDevAnalyzer {
 }
 
 impl Analyzer for StdDevAnalyzer {
-    fn process_result(&mut self, document: &OrderedDocument) -> Result<(), TipupError> {
+    fn process_measurement(&mut self, document: &OrderedDocument) -> Result<(), TipupError> {
         //retrieve variables from document
         let hostname = match document.get("hostname") {
             Some(&Bson::String(ref hostname)) => hostname.to_owned(),
@@ -92,7 +94,7 @@ impl Analyzer for StdDevAnalyzer {
 
             //if value is greater than 1.5 standard deviations raise warning
             if value > mean + (1.5 * std_dev) {
-                let flag = try!(Flag::new(document, FlagStatus::Warning, &self.name));
+                let flag = try!(Flag::new(document, &self.status, &self.name));
                 self.flag_tx.send(flag);
             }
         }

@@ -48,17 +48,17 @@ impl ResultWindow {
     }
 
     pub fn add_result(&mut self, document: OrderedDocument) -> Result<(), TipupError> {
-        //parse hostname and url
-        let (hostname, url);
+        //parse hostname and domain
+        let (hostname, domain);
         {
-            hostname = match document.get("hostname") {
+            hostname = match document.get("vantage_hostname") {
                 Some(&Bson::String(ref hostname)) => hostname.to_owned(),
-                _ => return Err(TipupError::from("failed to parse hostname from _id document")),
+                _ => return Err(TipupError::from("failed to parse vanage_hostname from _id document")),
             };
 
-            url = match document.get("url") {
+            domain = match document.get("measurement_domain") {
                 Some(&Bson::String(ref url)) => url.to_owned(),
-                _ => return Err(TipupError::from("failed to pase url from _id document")),
+                _ => return Err(TipupError::from("failed to parse measurement_domain from _id document")),
             };
         }
 
@@ -66,7 +66,7 @@ impl ResultWindow {
         for variable_window in self.variable_windows.iter() {
             {
                 let mut variable_window = variable_window.write().unwrap();
-                try!(variable_window.add_result(&hostname, &url, &document));
+                try!(variable_window.add_result(&hostname, &domain, &document));
             }
         }
 
@@ -90,16 +90,16 @@ impl VariableWindow {
     fn initialize(&mut self, proddle_db: &Database) -> Result<(), TipupError> {
         let start_time = time::now_utc().to_timespec().sec - (60 * 60 * 24 * 5);
         let timestamp_gte = doc!("$gte" => start_time);
-        let match_doc = doc!("measurement" => "http-get", "timestamp" => timestamp_gte);
-        let id_doc = doc!("hostname" => "$hostname", "url" => "$url");
-        let values_doc = doc!("$push" => "$result.application_layer_latency");
+        let match_doc = doc!("measurement_class" => "HttpGet", "timestamp" => timestamp_gte);
+        let id_doc = doc!("vantage_hostname" => "$hostname", "domain" => "$domain");
+        let values_doc = doc!("$push" => "$total_time");
         let group_doc = doc!("_id" => id_doc, "values" => values_doc);
         let aggregate_doc = vec!(
             doc!("$match" => match_doc),
             doc!("$group" => group_doc),
         );
 
-        for document in try!(proddle_db.collection("results").aggregate(aggregate_doc, None)) {
+        for document in try!(proddle_db.collection("measurements").aggregate(aggregate_doc, None)) {
             //retrieve variable values from bson document
             let document = try!(document);
 
@@ -108,13 +108,13 @@ impl VariableWindow {
                 _ => continue,
             };
 
-            let hostname = match id_document.get("hostname") {
+            let hostname = match id_document.get("vantage_hostname") {
                 Some(&Bson::String(ref hostname)) => hostname.to_owned(),
                 _ => continue,
             };
 
-            let url = match id_document.get("url") {
-                Some(&Bson::String(ref url)) => url.to_owned(),
+            let domain = match id_document.get("domain") {
+                Some(&Bson::String(ref domain)) => domain.to_owned(),
                 _ => continue,
             };
 
@@ -136,15 +136,15 @@ impl VariableWindow {
             };
 
             //insert values into variable values map
-            self.values.entry(hostname).or_insert(HashMap::new()).insert(url, values);
+            self.values.entry(hostname).or_insert(HashMap::new()).insert(domain, values);
         }
 
         Ok(())
     }
 
-    fn add_result(&mut self, hostname: &str, url: &str, document: &OrderedDocument) -> Result<(), TipupError> {
+    fn add_result(&mut self, hostname: &str, domain: &str, document: &OrderedDocument) -> Result<(), TipupError> {
         if let Some(value) = get_value(&self.variable_name, document) {
-            let values = self.values.entry(hostname.to_owned()).or_insert(HashMap::new()).entry(url.to_owned()).or_insert(Vec::new());
+            let values = self.values.entry(hostname.to_owned()).or_insert(HashMap::new()).entry(domain.to_owned()).or_insert(Vec::new());
             values.push(value);
             if values.len() > 10 {
                 values.remove(0);
@@ -154,9 +154,9 @@ impl VariableWindow {
         Ok(())
     }
 
-    pub fn get_values(&self, hostname: &str, url: &str) -> Option<&Vec<f64>> {
-        if let Some(url_map) = self.values.get(hostname) {
-            if let Some(results) = url_map.get(url) {
+    pub fn get_values(&self, hostname: &str, domain: &str) -> Option<&Vec<f64>> {
+        if let Some(domain_map) = self.values.get(hostname) {
+            if let Some(results) = domain_map.get(domain) {
                 return Some(results);
             }
         }
