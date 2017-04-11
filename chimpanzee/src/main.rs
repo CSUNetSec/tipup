@@ -53,15 +53,32 @@ fn main() {
             .unwrap_or_else(|e| e.exit());
 
     if args.cmd_cluster {
-        /*//read flags into flag vec
+        //read flags into flag vec
         let mut measurements = Vec::new();
         {
-            let file = match File::open(filename) {
+            let mut file = match File::open(args.arg_filename.unwrap()) {
                 Ok(file) => file,
                 Err(e) => panic!("{}", e),
             };
 
-            let mut buf_reader = BufReader::new(args.arg_filename.unwrap());
+            loop {
+                match bson::decode_document(&mut file) {
+                    Ok(document) => {
+                        println!("DOCUMENT: {:?}", document);
+                        measurements.push(document);
+                        if measurements.len() % 1000 == 0 {
+                            println!("{}", measurements.len());
+                        }
+                    },
+                    Err(e) => {
+                        println!("ERROR: {}", e);
+                        break;
+                    }
+                }
+            }
+
+            println!("HANDLING {} MEASUREMENTS", measurements.len());
+            /*let mut buf_reader = BufReader::new(args.arg_filename.unwrap());
             let mut line = String::new();
             loop {
                 if let Err(e) = buf_reader.read_line(&mut line) {
@@ -78,10 +95,10 @@ fn main() {
                 }
 
                 line.clear();
-            }
+            }*/
         }
  
-        //perform dbscan
+        /*//perform dbscan
         let (clustering, matrix) = cluster::dbscan(&flags, 65.0, 3);
 
         //print graphml
@@ -137,10 +154,9 @@ fn main() {
      
         //query proddle db for recent flags
         let (min_ts, max_ts) = (args.arg_min_ts.unwrap(), args.arg_max_ts.unwrap());
-        let timestamp_gte_document = doc!("$gte" => min_ts);
-        let timestamp_lte_document = doc!("$lt" => max_ts);
+        let timestamp_document = doc!("$gte" => min_ts, "$lte" => max_ts);
         let exists_document = doc!("$exists" => true);
-        let search_document = Some(doc!("timestamp" => timestamp_gte_document, "timestamp" => timestamp_lte_document, "remaining_attempts" => 0, "measurement_error_message" => exists_document));
+        let search_document = Some(doc!("timestamp" => timestamp_document, "remaining_attempts" => 0, "measurement_error_message" => exists_document));
 
         //iterate over results
         let cursor = match db.collection("measurements").find(search_document, None) {
@@ -151,24 +167,15 @@ fn main() {
         let stdout = io::stdout();
         let mut handle = stdout.lock();
         for document in cursor {
-            let document = match document {
-                Ok(document) => document,
+            match document {
+                Ok(document) => {
+                    //print bson object to stream
+                    if let Err(e) = bson::encode_document(&mut handle, &document) {
+                        panic!("{}", e);
+                    }
+                },
                 Err(e) => panic!("{}", e),
             };
-            
-            /*//check if measurement is a failure
-            if let Some(_) = document.get("error_message") {
-                match document.get("remaining_attempts") {
-                    Some(&Bson::I32(0)) => {},
-                    Some(&Bson::I64(0)) => {},
-                    _ => continue,
-                }
-            }*/
-
-            //print bson object to stream
-            if let Err(e) = bson::encode_document(&mut handle, &document) {
-                panic!("{}", e);
-            }
         }
     }
 }
