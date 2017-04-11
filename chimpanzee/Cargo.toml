@@ -1,0 +1,13 @@
+[package]
+name = "prototype"
+version = "0.1.0"
+authors = ["Dan Rammer <hamersaw@bushpath.com>"]
+
+[dependencies]
+dbscan = {path="blog/en-2017-01-01-implementing-dbscan-from-distance-matrix-in-rust"}
+bson = "0.4"
+mongodb = { version = "0.2", features = ["ssl"]}
+rustc-serialize = "0.3"
+serde = "0.9"
+serde_derive = "0.9"
+serde_json = "0.9"
