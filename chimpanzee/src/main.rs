@@ -4,23 +4,14 @@ extern crate dbscan;
 extern crate docopt;
 extern crate mongodb;
 extern crate rustc_serialize;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
 
 use bson::Bson;
-use bson::oid::ObjectId;
 use docopt::Docopt;
 use mongodb::{Client, ClientOptions, ThreadedClient};
 use mongodb::db::ThreadedDatabase;
-use serde_json::Value;
-use serde_json::value::ToJson;
-
-//mod cluster;
 
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Write};
 
 const USAGE: &'static str = "
 chimpanzee
@@ -156,15 +147,27 @@ fn main() {
             Err(e) => panic!("{}", e),
         };
 
+        let stdout = io::stdout();
+        let mut handle = stdout.lock();
         for document in cursor {
             let document = match document {
                 Ok(document) => document,
                 Err(e) => panic!("{}", e),
             };
             
-            //TODO check if measurement is a failure
+            //check if measurement is a failure
+            if let Some(_) = document.get("error_message") {
+                match document.get("remaining_attempts") {
+                    Some(&Bson::I32(0)) => {},
+                    Some(&Bson::I64(0)) => {},
+                    _ => continue,
+                }
+            }
 
-            //TODO print document
+            //print bson object to stream
+            if let Err(e) = bson::encode_document(&mut handle, &document) {
+                panic!("{}", e);
+            }
         }
     }
 }

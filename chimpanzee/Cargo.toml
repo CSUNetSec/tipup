@@ -6,9 +6,6 @@ authors = ["Dan Rammer <hamersaw@bushpath.com>"]
 [dependencies]
 dbscan = {path="blog/en-2017-01-01-implementing-dbscan-from-distance-matrix-in-rust"}
 docopt = "0.7"
-bson = "0.4"
+bson = "0.6"
 mongodb = { version = "0.2", features = ["ssl"]}
 rustc-serialize = "0.3"
-serde = "0.9"
-serde_derive = "0.9"
-serde_json = "0.9"
