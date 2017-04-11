@@ -23,12 +23,12 @@ Usage:
     chimpanzee --version
 
 Options:
-    -h --help       Show this screen.
-    --version       Show version.
-    --ca            Ca ssl certification.
-    --cert          Ssl certification file.
-    --key           Ssl key file.
-    --mongodb-port  Mongodb port [default: 27017].
+    -h --help                           Show this screen.
+    --version                           Show version.
+    --ca=<ca_file>                      Ca ssl certification.
+    --cert=<cert_file>                  Ssl certification file.
+    --key=<key_file>                    Ssl key file.
+    --mongodb_port=<mongodb_port>       Mongodb port.
 ";
 
 #[derive(Debug, RustcDecodable)]
