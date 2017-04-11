@@ -18,32 +18,32 @@ chimpanzee
 
 Usage:
     chimpanzee cluster <filename>
-    chimpanzee dump [--ca=<ca_file>] [--cert=<cert_file>] [--key=<key_file>] <mongodb_ip> [--mongodb_port=<mongodb_port>] <username> <password> <min_ts> <max_ts>
+    chimpanzee dump [--ca=<ca-file>] [--cert=<cert-file>] [--key=<key-file>] <mongodb-ip> [--mongodb-port=<mongodb-port>] <username> <password> <min-ts> <max-ts>
     chimpanzee (-h | --help)
     chimpanzee --version
 
 Options:
     -h --help                           Show this screen.
     --version                           Show version.
-    --ca=<ca_file>                      Ca ssl certification.
-    --cert=<cert_file>                  Ssl certification file.
-    --key=<key_file>                    Ssl key file.
-    --mongodb_port=<mongodb_port>       Mongodb port.
+    --ca=<ca-file>                      Ca ssl certification.
+    --cert=<cert-file>                  Ssl certification file.
+    --key=<key-file>                    Ssl key file.
+    --mongodb-port=<mongodb-port>       Mongodb port [default: 27017].
 ";
 
 #[derive(Debug, RustcDecodable)]
 struct Args {
     arg_filename: Option<String>,
-    arg_password: Option<String>,
     arg_max_ts: Option<u64>,
     arg_min_ts: Option<u64>,
     arg_mongodb_ip: Option<String>,
+    arg_password: Option<String>,
     arg_username: Option<String>,
     cmd_cluster: bool,
     cmd_dump: bool,
-    flag_ca_file: Option<String>,
-    flag_cert_file: Option<String>,
-    flag_key_file: Option<String>,
+    flag_ca: Option<String>,
+    flag_cert: Option<String>,
+    flag_key: Option<String>,
     flag_mongodb_port: u16,
 }
 
@@ -115,10 +115,10 @@ fn main() {
         println!("\t</graph>");
         println!("</graphml>");*/
     } else if args.cmd_dump {
-        //connect to tipup db
-        let client = if args.flag_ca_file.is_some() && args.flag_cert_file.is_some() && args.flag_key_file.is_some() {
-            let client_options = ClientOptions::with_ssl(&args.flag_ca_file.unwrap(), 
-                    &args.flag_cert_file.unwrap(), &args.flag_key_file.unwrap(), true);
+        //connect to db
+        let client = if args.flag_ca.is_some() && args.flag_cert.is_some() && args.flag_key.is_some() {
+            let client_options = ClientOptions::with_ssl(&args.flag_ca.unwrap(), 
+                    &args.flag_cert.unwrap(), &args.flag_key.unwrap(), true);
             Client::connect_with_options(&args.arg_mongodb_ip.unwrap(), args.flag_mongodb_port, client_options)
         } else {
             Client::connect(&args.arg_mongodb_ip.unwrap(), args.flag_mongodb_port)
@@ -139,7 +139,8 @@ fn main() {
         let (min_ts, max_ts) = (args.arg_min_ts.unwrap(), args.arg_max_ts.unwrap());
         let timestamp_gte_document = doc!("$gte" => min_ts);
         let timestamp_lte_document = doc!("$lt" => max_ts);
-        let search_document = Some(doc!("timestamp" => timestamp_gte_document, "timestamp" => timestamp_lte_document));
+        let exists_document = doc!("$exists" => true);
+        let search_document = Some(doc!("timestamp" => timestamp_gte_document, "timestamp" => timestamp_lte_document, "remaining_attempts" => 0, "measurement_error_message" => exists_document));
 
         //iterate over results
         let cursor = match db.collection("measurements").find(search_document, None) {
@@ -155,14 +156,14 @@ fn main() {
                 Err(e) => panic!("{}", e),
             };
             
-            //check if measurement is a failure
+            /*//check if measurement is a failure
             if let Some(_) = document.get("error_message") {
                 match document.get("remaining_attempts") {
                     Some(&Bson::I32(0)) => {},
                     Some(&Bson::I64(0)) => {},
                     _ => continue,
                 }
-            }
+            }*/
 
             //print bson object to stream
             if let Err(e) = bson::encode_document(&mut handle, &document) {
