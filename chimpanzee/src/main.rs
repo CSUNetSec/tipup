@@ -6,12 +6,12 @@ extern crate mongodb;
 extern crate rustc_serialize;
 
 use bson::Bson;
+use bson::ordered::OrderedDocument;
 use docopt::Docopt;
 use mongodb::{Client, ClientOptions, ThreadedClient};
 use mongodb::db::ThreadedDatabase;
 
 use std::fs::File;
-use std::io::{self, BufRead, BufReader, Write};
 
 const USAGE: &'static str = "
 chimpanzee
@@ -19,6 +19,7 @@ chimpanzee
 Usage:
     chimpanzee cluster <filename>
     chimpanzee dump [--ca=<ca-file>] [--cert=<cert-file>] [--key=<key-file>] <mongodb-ip> [--mongodb-port=<mongodb-port>] <username> <password> <min-ts> <max-ts>
+    chimpanzee extract <filename> <field>
     chimpanzee (-h | --help)
     chimpanzee --version
 
@@ -33,6 +34,7 @@ Options:
 
 #[derive(Debug, RustcDecodable)]
 struct Args {
+    arg_field: Option<String>,
     arg_filename: Option<String>,
     arg_max_ts: Option<u64>,
     arg_min_ts: Option<u64>,
@@ -41,6 +43,7 @@ struct Args {
     arg_username: Option<String>,
     cmd_cluster: bool,
     cmd_dump: bool,
+    cmd_extract: bool,
     flag_ca: Option<String>,
     flag_cert: Option<String>,
     flag_key: Option<String>,
@@ -54,49 +57,7 @@ fn main() {
 
     if args.cmd_cluster {
         //read flags into flag vec
-        let mut measurements = Vec::new();
-        {
-            let mut file = match File::open(args.arg_filename.unwrap()) {
-                Ok(file) => file,
-                Err(e) => panic!("{}", e),
-            };
-
-            loop {
-                match bson::decode_document(&mut file) {
-                    Ok(document) => {
-                        println!("DOCUMENT: {:?}", document);
-                        measurements.push(document);
-                        if measurements.len() % 1000 == 0 {
-                            println!("{}", measurements.len());
-                        }
-                    },
-                    Err(e) => {
-                        println!("ERROR: {}", e);
-                        break;
-                    }
-                }
-            }
-
-            println!("HANDLING {} MEASUREMENTS", measurements.len());
-            /*let mut buf_reader = BufReader::new(args.arg_filename.unwrap());
-            let mut line = String::new();
-            loop {
-                if let Err(e) = buf_reader.read_line(&mut line) {
-                    panic!("{}", e);
-                }
-
-                if line.len() == 0 {
-                    break;
-                }
-
-                match serde_json::from_str::<Value>(&line) {
-                    Ok(json) => measurements.push(json),
-                    Err(e) => panic!("{}", e);
-                }
-
-                line.clear();
-            }*/
-        }
+        let mut measurements = read_measurements(&args.arg_filename.unwrap());
  
         /*//perform dbscan
         let (clustering, matrix) = cluster::dbscan(&flags, 65.0, 3);
@@ -164,18 +125,62 @@ fn main() {
             Err(e) => panic!("{}", e),
         };
 
-        let stdout = io::stdout();
-        let mut handle = stdout.lock();
+        let mut file = match File::create("chimpanzee.bin") {
+            Ok(file) => file,
+            Err(e) => panic!("{}", e),
+        };
+
+        let mut count = 0;
         for document in cursor {
             match document {
                 Ok(document) => {
+                    count += 1;
                     //print bson object to stream
-                    if let Err(e) = bson::encode_document(&mut handle, &document) {
+                    if let Err(e) = bson::encode_document(&mut file, &document) {
                         panic!("{}", e);
                     }
                 },
                 Err(e) => panic!("{}", e),
             };
         }
+        println!("count:{}", count);
+    } else if args.cmd_extract {
+        //read flags into flag vec
+        let measurements = match read_measurements(&args.arg_filename.unwrap()) {
+            Ok(measurements) => measurements,
+            Err(e) => panic!("{}", e),
+        };
+
+        let field = args.arg_field.unwrap();
+        for measurement in measurements {
+            match measurement.get(&field) {
+                Some(&Bson::String(ref value)) => println!("{}", value),
+                Some(&Bson::I64(value)) => println!("{}", value),
+                Some(&Bson::I32(value)) => println!("{}", value),
+                _ => continue,
+            }
+        }
     }
+}
+
+fn read_measurements(filename: &str) -> Result<Vec<OrderedDocument>, std::io::Error> {
+    let mut file = match File::open(filename) {
+        Ok(file) => file,
+        Err(e) => panic!("{}", e),
+    };
+
+    let mut measurements = Vec::new();
+    loop {
+        match bson::decode_document(&mut file) {
+            Ok(document) => {
+                measurements.push(document);
+            },
+            Err(e) => {
+                println!("ERROR: {}", e);
+                break;
+            }
+        }
+    }
+
+    Ok(measurements)
 }
